@@ -1,6 +1,6 @@
 <#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.0
+  🛠️  开发环境一键配置工具  v1.1
   支持: Python / Java / C/C++ / Node.js / Git / Docker 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -10,10 +10,7 @@
 if (-NOT ([System.Security.Principal.WindowsPrincipal] [System.Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([System.Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "`n  [警告] 建议以管理员身份运行此脚本，否则部分安装可能失败。" -ForegroundColor Yellow
     Write-Host "  是否继续以非管理员身份运行? (Y/N): " -NoNewline -ForegroundColor Yellow
-    $adminChoice = Read-Host
-    if ($adminChoice -notmatch '^[Yy]$') {
-        exit
-    }
+    if ((Read-Host) -notmatch '^[Yy]$') { exit }
 }
 
 # 检查 winget 是否可用 (必须)
@@ -21,8 +18,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Write-Host "`n  ❌ 错误: 未检测到 winget 包管理器!" -ForegroundColor Red
     Write-Host "  winget 是 Windows 10 1809+ 自带的包管理工具。" -ForegroundColor Yellow
     Write-Host "  请确保您的 Windows 版本满足要求，或在 Microsoft Store 中安装 '应用安装程序'。" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  按任意键退出..." -ForegroundColor Gray
+    Write-Host "`n  按任意键退出..." -ForegroundColor Gray
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit 1
 }
@@ -49,351 +45,210 @@ $ColorStep    = "Blue"
 # ========================== 辅助函数 ==========================
 function Write-Title {
     Clear-Host
-    Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorTitle
-    Write-Host "  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.0           ║" -ForegroundColor $ColorTitle
-    Write-Host "  ║     Python · Java · C/C++ · Node.js · Git · Docker · ...    ║" -ForegroundColor $ColorTitle
-    Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $ColorTitle
-    Write-Host ""
+    Write-Host @"
+
+  ╔══════════════════════════════════════════════════════════════╗
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.1           ║
+  ║     Python · Java · C/C++ · Node.js · Git · Docker · ...    ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+"@
 }
 
-function Write-Step {
-    param([string]$Message)
-    $timestamp = Get-Date -Format "HH:mm:ss"
-    Write-Host "  [$timestamp] ▶ $Message" -ForegroundColor $ColorStep
-    $script:installLog += "[$timestamp] ▶ $Message"
-}
+function Write-Step { param([string]$m); $t = Get-Date -Format "HH:mm:ss"; Write-Host "  [$t] ▶ $m" -ForegroundColor $ColorStep; $script:installLog += "[$t] ▶ $m" }
+function Write-OK   { param([string]$m, [switch]$NoCount); Write-Host "              ✅ $m" -ForegroundColor $ColorSuccess; $script:installLog += "              ✅ $m"; if (-not $NoCount) { $script:completedSteps++ } }
+function Write-Fail { param([string]$m); Write-Host "              ❌ $m" -ForegroundColor $ColorError;   $script:installLog += "              ❌ $m" }
+function Write-Warn { param([string]$m); Write-Host "              ⚠️  $m" -ForegroundColor $ColorWarning; $script:installLog += "              ⚠️  $m" }
+function Write-Info { param([string]$m); Write-Host "              ℹ️  $m" -ForegroundColor $ColorInfo }
 
-function Write-OK {
-    param([string]$Message, [switch]$NoCount)
-    Write-Host "              ✅ $Message" -ForegroundColor $ColorSuccess
-    $script:installLog += "              ✅ $Message"
-    if (-not $NoCount) {
-        $script:completedSteps++
-    }
-}
-
-function Write-Fail {
-    param([string]$Message)
-    Write-Host "              ❌ $Message" -ForegroundColor $ColorError
-    $script:installLog += "              ❌ $Message"
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host "              ⚠️  $Message" -ForegroundColor $ColorWarning
-    $script:installLog += "              ⚠️  $Message"
-}
-
-function Write-Info {
-    param([string]$Message)
-    Write-Host "              ℹ️  $Message" -ForegroundColor $ColorInfo
-}
-
-# 检查某个命令是否已安装
 function Test-CommandExists {
     param([string]$Command)
-    try {
-        $null = Get-Command $Command -ErrorAction Stop
-        return $true
-    }
-    catch {
-        return $false
-    }
+    try { $null = Get-Command $Command -ErrorAction Stop; return $true } catch { return $false }
 }
 
-# 获取已安装工具的版本号
-# 安全: 使用脚本块 (& call operator) 替代 Invoke-Expression，防止命令注入
+# 获取已安装工具的版本号 (安全: 使用脚本块替代 Invoke-Expression)
 function Get-InstalledVersion {
     param([scriptblock]$VersionCommand)
-    try {
-        $output = & $VersionCommand 2>&1 | Select-Object -First 1
-        $str = if ($output -is [string]) { $output } else { $output.ToString() }
-        return $str.Trim()
-    }
-    catch {
-        return "未知"
-    }
+    try { $o = & $VersionCommand 2>&1 | Select-Object -First 1; return "$o".Trim() } catch { return "未知" }
 }
 
 # 版本比对提示：已有工具 → 展示当前版本 → 询问是否重新安装
 function Request-Confirmation {
-    param(
-        [string]$ToolName,
-        [string]$InstalledVersion,
-        [string]$TargetVersionDesc
-    )
+    param([string]$ToolName, [string]$InstalledVersion, [string]$TargetVersionDesc)
     Write-Host ""
     Write-Warn "$ToolName 已安装 (当前版本: $InstalledVersion)"
-    Write-Host "  ℹ️  脚本将安装版本: $TargetVersionDesc" -ForegroundColor $ColorInfo
+    Write-Info "脚本将安装版本: $TargetVersionDesc"
     Write-Host "  ❓ 是否重新安装/升级? (Y=升级覆盖, N=跳过保留当前): " -NoNewline -ForegroundColor $ColorPrompt
-    $answer = Read-Host
-    if ($answer -match '^[Yy]$') {
-        Write-Info "将重新安装/升级 $ToolName ..."
-        return $true  # 继续安装
-    }
-    else {
-        Write-Warn "已跳过 $ToolName (保留当前版本: $InstalledVersion)"
-        return $false # 跳过
-    }
+    if ((Read-Host) -match '^[Yy]$') { Write-Info "将重新安装/升级 $ToolName ..."; return $true }
+    Write-Warn "已跳过 $ToolName (保留当前版本: $InstalledVersion)"; return $false
 }
 
-# 等待 winget 安装完成 (仅使用 --id 安装，不接受额外自定义参数)
+# winget 安装 (--disable-interactivity 禁用 spinner 干扰输出)
 function Invoke-WingetInstall {
-    param(
-        [string]$PackageId,
-        [string]$DisplayName
-    )
-    
+    param([string]$PackageId, [string]$DisplayName)
     Write-Step "正在安装 $DisplayName ..."
-    $result = winget install --id $PackageId --accept-source-agreements --accept-package-agreements 2>&1
-    
-    # 检查结果
-    if ($LASTEXITCODE -eq 0 -or $result -match "已安装|已找到已安装|No applicable update found|already installed") {
-        Write-OK "$DisplayName 安装成功 (或已安装)"
-        return $true
+    $r = winget install --id $PackageId --disable-interactivity --accept-source-agreements --accept-package-agreements 2>&1
+    if ($LASTEXITCODE -eq 0 -or $r -match "已安装|已找到已安装|No applicable update|already installed|Successfully installed") {
+        Write-OK "$DisplayName 安装成功 (或已安装)"; return $true
     }
-    else {
-        Write-Fail "$DisplayName 安装失败"
-        Write-Info "尝试详情: $result"
-        return $false
+    elseif ($r -match "InternetOpenUrl|0x80072efd|0x80072ee7|0x80072f8f") {
+        Write-Fail "$DisplayName 安装失败: 无法连接到互联网"; return $false
     }
+    Write-Fail "$DisplayName 安装失败"; Write-Info "详情: $r"; return $false
 }
 
-# 检测 MSVC 编译器 (cl.exe 默认不在 PATH 中，需用 vswhere 或检测安装目录)
+# 检测 MSVC
 function Test-MsvcExists {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
         $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
         if ($vsPath) { return $true }
     }
-    $msvcDirs = @(
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\VC\Tools\MSVC",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\VC\Tools\MSVC"
-    )
-    foreach ($d in $msvcDirs) {
+    foreach ($d in "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC",
+                   "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC",
+                   "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC",
+                   "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC",
+                   "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\VC\Tools\MSVC",
+                   "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\VC\Tools\MSVC") {
         if (Test-Path $d) { return $true }
     }
     return $false
 }
 
-# 刷新 PATH 环境变量
-function Update-SessionPath {
+# 刷新 PATH
+function Update-Path {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+# 通用安装包装器：检测 → 确认 → 安装 → 刷新PATH (消除 switch 中的重复代码)
+function Invoke-Installer {
+    param([string]$ToolName, [string]$ExeName, [string]$PackageId, [string]$DisplayName, [string]$TargetDesc, [scriptblock]$VersionCmd, [string]$VerReplace)
+    Write-Host "`n  ── $ToolName ──────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    if (Test-CommandExists $ExeName) {
+        $ver = Get-InstalledVersion -VersionCommand $VersionCmd
+        if ($VerReplace) { $ver = $ver -replace $VerReplace, '' }
+        if (-not (Request-Confirmation -ToolName $DisplayName -InstalledVersion $ver -TargetVersionDesc $TargetDesc)) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $result = Invoke-WingetInstall -PackageId $PackageId -DisplayName $DisplayName
+    Update-Path
+    return $result
 }
 
 # ========================== 安装模块 ==========================
 
 function Install-Git {
-    Write-Host "`n  ── 🔧 Git ──────────────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "git") {
-        $ver = Get-InstalledVersion -VersionCommand { git --version }
-        $ver = $ver -replace 'git version ', ''
-        $doInstall = Request-Confirmation -ToolName "Git" -InstalledVersion $ver -TargetVersionDesc "Git (winget 最新稳定版)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    $result = Invoke-WingetInstall -PackageId "Git.Git" -DisplayName "Git"
-    Update-SessionPath
-    return $result
+    $r = Invoke-Installer -ToolName "🔧 Git" -ExeName "git" -PackageId "Git.Git" -DisplayName "Git" `
+        -TargetDesc "Git (winget 最新稳定版)" -VersionCmd { git --version } -VerReplace 'git version '
+    return $r
 }
 
 function Install-Python {
-    Write-Host "`n  ── 🐍 Python ───────────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "python") {
-        $ver = Get-InstalledVersion -VersionCommand { python --version }
-        $doInstall = Request-Confirmation -ToolName "Python" -InstalledVersion $ver -TargetVersionDesc "Python 3.12.x (最新小版本)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    $result = Invoke-WingetInstall -PackageId "Python.Python.3.12" -DisplayName "Python 3.12"
-    Update-SessionPath
-    
-    # 验证 pip (不计入总步骤)
-    if (Test-CommandExists "pip") {
-        Write-OK "pip 可用" -NoCount
-    }
-    else {
-        Write-Warn "pip 未找到，请手动验证 Python 安装"
-    }
-    return $result
+    $r = Invoke-Installer -ToolName "🐍 Python" -ExeName "python" -PackageId "Python.Python.3.12" -DisplayName "Python 3.12" `
+        -TargetDesc "Python 3.12.x (最新小版本)" -VersionCmd { python --version }
+    if (Test-CommandExists "pip") { Write-OK "pip 可用" -NoCount } else { Write-Warn "pip 未找到，请手动验证 Python 安装" }
+    return $r
 }
 
 function Install-Java {
-    Write-Host "`n  ── ☕ Java (JDK) ───────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "java") {
-        $ver = Get-InstalledVersion -VersionCommand { java -version 2>&1 }
-        $doInstall = Request-Confirmation -ToolName "Java (JDK)" -InstalledVersion $ver -TargetVersionDesc "Eclipse Temurin JDK 21 (LTS)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    
-    # 使用 Eclipse Temurin JDK 21 (LTS)
-    $result = Invoke-WingetInstall -PackageId "EclipseAdoptium.Temurin.21.JDK" -DisplayName "Eclipse Temurin JDK 21 (LTS)"
-    Update-SessionPath
-    
-    # 设置 JAVA_HOME (不计入总步骤)
+    $r = Invoke-Installer -ToolName "☕ Java (JDK)" -ExeName "java" -PackageId "EclipseAdoptium.Temurin.21.JDK" `
+        -DisplayName "Eclipse Temurin JDK 21 (LTS)" -TargetDesc "Eclipse Temurin JDK 21 (LTS)" -VersionCmd { java -version 2>&1 }
+    # 设置 JAVA_HOME
     try {
-        $javaPath = ${env:JAVA_HOME}
-        if (-not $javaPath) {
-            $possiblePaths = @(
-                "C:\Program Files\Eclipse Adoptium\jdk-21.0.0.35-hotspot\",
-                "C:\Program Files\Eclipse Adoptium\jdk-21*\"
-            )
-            foreach ($p in $possiblePaths) {
-                $found = Get-Item $p -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($found) {
-                    [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $found.FullName, "Machine")
-                    Write-OK "JAVA_HOME 已设置为: $($found.FullName)" -NoCount
-                    break
-                }
+        if (-not ${env:JAVA_HOME}) {
+            foreach ($p in "C:\Program Files\Eclipse Adoptium\jdk-21.0.0.35-hotspot\", "C:\Program Files\Eclipse Adoptium\jdk-21*\") {
+                $f = Get-Item $p -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($f) { [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $f.FullName, "Machine"); Write-OK "JAVA_HOME 已设置为: $($f.FullName)" -NoCount; break }
             }
         }
-    }
-    catch {
-        Write-Warn "JAVA_HOME 设置失败，请手动配置"
-    }
-    return $result
+    } catch { Write-Warn "JAVA_HOME 设置失败，请手动配置" }
+    return $r
 }
 
 function Install-CPP {
     Write-Host "`n  ── ⚙️  C/C++ 开发工具 ──────────────────────────────────" -ForegroundColor $ColorMenu
+    $compilerDesc = [System.Collections.ArrayList]@()
+    if (Test-CommandExists "gcc")   { $null = $compilerDesc.Add("GCC $(Get-InstalledVersion { gcc --version })") }
+    if (Test-CommandExists "g++")   { $null = $compilerDesc.Add("G++ $(Get-InstalledVersion { g++ --version })") }
+    if (Test-CommandExists "clang") { $null = $compilerDesc.Add("Clang $(Get-InstalledVersion { clang --version })") }
+    if (Test-MsvcExists)            { $null = $compilerDesc.Add("MSVC (Visual Studio)") }
     
-    # 检测已有编译器
-    $hasGCC = Test-CommandExists "gcc"
-    $hasGPP = Test-CommandExists "g++"
-    $hasClang = Test-CommandExists "clang"
-    $hasMSVC = Test-MsvcExists
-    $compilerFound = $false
+    $compilerFound = ($compilerDesc.Count -gt 0)
+    $doCompilerInstall = $true
     $somethingInstalled = $false
     
-    if ($hasGCC -and $hasGPP) {
-        $ver = Get-InstalledVersion -VersionCommand { gcc --version }
-        $doInstall = Request-Confirmation -ToolName "MinGW/GCC" -InstalledVersion $ver -TargetVersionDesc "MinGW-w64 (BrechtSanders.WinLibs)"
-        if (-not $doInstall) { $compilerFound = $true; $script:completedSteps++ }
-    }
-    elseif ($hasClang) {
-        $ver = Get-InstalledVersion -VersionCommand { clang --version }
-        $doInstall = Request-Confirmation -ToolName "Clang" -InstalledVersion $ver -TargetVersionDesc "MinGW-w64 (GCC/G++)"
-        if (-not $doInstall) { $compilerFound = $true; $script:completedSteps++ }
-    }
-    elseif ($hasMSVC) {
-        $ver = "MSVC (Visual Studio)"
-        $doInstall = Request-Confirmation -ToolName "MSVC" -InstalledVersion $ver -TargetVersionDesc "MinGW-w64 (GCC/G++)"
-        if (-not $doInstall) { $compilerFound = $true; $script:completedSteps++ }
+    if ($compilerFound) {
+        $doCompilerInstall = Request-Confirmation -ToolName "C/C++ 编译器" -InstalledVersion ($compilerDesc -join "; ") `
+            -TargetVersionDesc "MinGW-w64 (GCC/G++)"
+        if (-not $doCompilerInstall) { $script:completedSteps++ }
     }
     
-    if (-not $compilerFound) {
-        Write-Step "正在安装 MinGW-w64 (GCC/G++) ..."
-        Invoke-WingetInstall -PackageId "BrechtSanders.WinLibs" -DisplayName "MinGW-w64 (GCC/G++)"
-        Update-SessionPath
-        $somethingInstalled = $true
-    }
-    
-    # 可选: 安装 CMake
-    if (Test-CommandExists "cmake") {
-        $cmakeVer = Get-InstalledVersion -VersionCommand { cmake --version }
-        $doCmake = Request-Confirmation -ToolName "CMake" -InstalledVersion $cmakeVer -TargetVersionDesc "CMake (winget 最新版)"
-        if ($doCmake) {
-            Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"
-            Update-SessionPath
-            $somethingInstalled = $true
+    if ($doCompilerInstall) {
+        Write-Step $(if ($compilerFound) { "正在安装/升级 MinGW-w64 (GCC/G++) ..." } else { "未检测到 C/C++ 编译器，正在安装 MinGW-w64 (GCC/G++) ..." })
+        $mingwInstalled = $false
+        foreach ($e in @(@{Id="WinLibs.GCC"; Name="WinLibs GCC"}, @{Id="MSYS2.MSYS2"; Name="MSYS2 (含 MinGW-w64)"})) {
+            $mingwInstalled = Invoke-WingetInstall -PackageId $e.Id -DisplayName $e.Name
+            if ($mingwInstalled) {
+                if ($e.Id -eq "MSYS2.MSYS2" -and (Test-Path "C:\msys64\mingw64\bin")) {
+                    $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+                    if ($curPath -notmatch [regex]::Escape("C:\msys64\mingw64\bin")) {
+                        [System.Environment]::SetEnvironmentVariable("Path", "$curPath;C:\msys64\mingw64\bin", "Machine")
+                        Write-OK "已追加 MSYS2 MinGW 路径到系统 PATH" -NoCount
+                    }
+                }
+                Update-Path; $somethingInstalled = $true; break
+            }
         }
-    }
-    else {
-        Write-Step "正在安装 CMake ..."
-        Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"
-        Update-SessionPath
-        $somethingInstalled = $true
+        if (-not $mingwInstalled) { Write-Warn "所有 MinGW 包 ID 均失败，请手动从 https://winlibs.com 或 https://www.msys2.org 下载安装。" }
     }
     
+    # CMake
+    if (Test-CommandExists "cmake") {
+        $doCmake = Request-Confirmation -ToolName "CMake" -InstalledVersion (Get-InstalledVersion { cmake --version }) -TargetVersionDesc "CMake (winget 最新版)"
+        if ($doCmake) { Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"; Update-Path; $somethingInstalled = $true }
+        else { $script:completedSteps++ }
+    } else {
+        Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"; Update-Path; $somethingInstalled = $true
+    }
     return $somethingInstalled
 }
 
 function Install-NodeJS {
-    Write-Host "`n  ── 🟢 Node.js ──────────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "node") {
-        $ver = Get-InstalledVersion -VersionCommand { node --version }
-        $doInstall = Request-Confirmation -ToolName "Node.js" -InstalledVersion $ver -TargetVersionDesc "Node.js LTS (当前为 22.x)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    $result = Invoke-WingetInstall -PackageId "OpenJS.NodeJS.LTS" -DisplayName "Node.js (LTS)"
-    Update-SessionPath
-    
-    # 检查 npm (不计入总步骤)
+    $r = Invoke-Installer -ToolName "🟢 Node.js" -ExeName "node" -PackageId "OpenJS.NodeJS.LTS" -DisplayName "Node.js (LTS)" `
+        -TargetDesc "Node.js LTS (当前为 22.x)" -VersionCmd { node --version }
     if (Test-CommandExists "npm") {
-        try {
-            $npmVer = (npm --version 2>&1 | Select-Object -First 1)
-            Write-OK "npm 可用 (版本: $npmVer)" -NoCount
-        }
-        catch {
-            Write-Warn "npm 已安装但执行异常，请手动验证"
-        }
+        try { Write-OK "npm 可用 (版本: $(npm --version 2>&1 | Select-Object -First 1))" -NoCount }
+        catch { Write-Warn "npm 已安装但执行异常，请手动验证" }
     }
-    return $result
+    return $r
 }
 
 function Install-Docker {
-    Write-Host "`n  ── 🐳 Docker ───────────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "docker") {
-        $ver = Get-InstalledVersion -VersionCommand { docker --version }
-        $ver = $ver -replace 'Docker version ', ''
-        $doInstall = Request-Confirmation -ToolName "Docker" -InstalledVersion $ver -TargetVersionDesc "Docker Desktop (winget 最新)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    Write-Step "正在安装 Docker Desktop ..."
+    $r = Invoke-Installer -ToolName "🐳 Docker" -ExeName "docker" -PackageId "Docker.DockerDesktop" -DisplayName "Docker Desktop" `
+        -TargetDesc "Docker Desktop (winget 最新)" -VersionCmd { docker --version } -VerReplace 'Docker version '
     Write-Info "注意: Docker Desktop 安装完成后需要重启系统。"
-    $result = Invoke-WingetInstall -PackageId "Docker.DockerDesktop" -DisplayName "Docker Desktop"
-    Update-SessionPath
-    return $result
+    return $r
 }
 
 function Install-VSCode {
-    Write-Host "`n  ── 📝 Visual Studio Code ───────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "code") {
-        $ver = Get-InstalledVersion -VersionCommand { code --version }
-        $doInstall = Request-Confirmation -ToolName "VS Code" -InstalledVersion $ver -TargetVersionDesc "VS Code (最新稳定版)"
-        if (-not $doInstall) { $script:completedSteps++; return $false }
-    }
-    $result = Invoke-WingetInstall -PackageId "Microsoft.VisualStudioCode" -DisplayName "Visual Studio Code"
-    Update-SessionPath
-    return $result
+    return Invoke-Installer -ToolName "📝 Visual Studio Code" -ExeName "code" -PackageId "Microsoft.VisualStudioCode" `
+        -DisplayName "Visual Studio Code" -TargetDesc "VS Code (最新稳定版)" -VersionCmd { code --version }
 }
 
 function Install-All {
-    Write-Host "`n" -NoNewline
-    Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
+    Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
     Write-Host "  ║         🚀  开 始 一 键 安 装 所 有 工 具                  ║" -ForegroundColor "Red"
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor "Red"
-    
-    $script:totalSteps = 7
-    $script:completedSteps = 0
-    
+    $script:totalSteps = 7; $script:completedSteps = 0
     $startTime = Get-Date
-    
-    Install-Git
-    Install-Python
-    Install-Java
-    Install-CPP
-    Install-NodeJS
-    Install-Docker
-    Install-VSCode
-    
-    $endTime = Get-Date
-    $duration = ($endTime - $startTime).TotalMinutes.ToString("F1")
-    
+    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode
+    $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
-    if ($script:completedSteps -ge $script:totalSteps) {
-        Write-Host "  ║        ✅  所有工具已就绪，无需额外安装!                    ║" -ForegroundColor $ColorSuccess
-    }
-    else {
-        Write-Host "  ║              🎉  安装流程完成!                              ║" -ForegroundColor $ColorSuccess
-    }
-    Write-Host "  ║              就绪: $script:completedSteps / 耗时: ${duration}分钟                          ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║        $(if ($script:completedSteps -ge $script:totalSteps) { '✅  所有工具已就绪，无需额外安装!' } else { '🎉  安装流程完成!' })                              ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║              就绪: $script:completedSteps / 耗时: ${dur}分钟                          ║" -ForegroundColor $ColorSuccess
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $ColorSuccess
-    
     Show-Summary
     Invoke-Reboot
 }
@@ -401,42 +256,31 @@ function Install-All {
 # ========================== 显示摘要 ==========================
 function Show-Summary {
     Write-Host "`n  ── 📋 当前环境检测结果 ──────────────────────────────────" -ForegroundColor $ColorMenu
-    Update-SessionPath
-    
-    # 注意: Cmd 必须是 ScriptBlock，不能是字符串
-    # 若用 "git --version" 字符串配合 & 操作符，PowerShell 会将整个字符串当命令名查找，导致失败
+    Update-Path
     $tools = @(
-        @{Name="Git";      Cmd={ git --version }},
-        @{Name="Python";   Cmd={ python --version }},
-        @{Name="pip";      Cmd={ pip --version }},
-        @{Name="Java";     Cmd={ java -version 2>&1 }},
-        @{Name="javac";    Cmd={ javac --version }},
-        @{Name="GCC";      Cmd={ gcc --version }},
-        @{Name="G++";      Cmd={ g++ --version }},
-        @{Name="Node.js";  Cmd={ node --version }},
-        @{Name="npm";      Cmd={ npm --version }},
-        @{Name="Docker";   Cmd={ docker --version }},
-        @{Name="CMake";    Cmd={ cmake --version }},
-        @{Name="VS Code";  Cmd={ code --version }}
+        @{L="Git";      C={ git --version }},
+        @{L="Python";   C={ python --version }},
+        @{L="pip";      C={ pip --version }},
+        @{L="Java";     C={ java -version 2>&1 }},
+        @{L="javac";    C={ javac --version }},
+        @{L="GCC";      C={ gcc --version }},
+        @{L="G++";      C={ g++ --version }},
+        @{L="Node.js";  C={ node --version }},
+        @{L="npm";      C={ npm --version }},
+        @{L="Docker";   C={ docker --version }},
+        @{L="CMake";    C={ cmake --version }},
+        @{L="VS Code";  C={ code --version }}
     )
-    
-    foreach ($tool in $tools) {
-        try {
-            $output = & $tool.Cmd 2>&1 | Select-Object -First 1
-            $str = if ($output -is [string]) { $output } else { $output.ToString() }
-            Write-Host "  ✅ $($tool.Name.PadRight(10)) : $str" -ForegroundColor $ColorSuccess
-        }
-        catch {
-            Write-Host "  ❌ $($tool.Name.PadRight(10)) : 未安装" -ForegroundColor $ColorError
-        }
+    foreach ($t in $tools) {
+        try { $v = & $t.C 2>&1 | Select-Object -First 1; Write-Host "  ✅ $($t.L.PadRight(10)) : $v" -ForegroundColor $ColorSuccess }
+        catch { Write-Host "  ❌ $($t.L.PadRight(10)) : 未安装" -ForegroundColor $ColorError }
     }
 }
 
 function Invoke-Reboot {
     Write-Host "`n  ⚠️  部分工具 (如 Docker) 安装后需要重启系统才能完全生效。" -ForegroundColor $ColorWarning
     Write-Host "  是否立即重启? (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
-    $rebootChoice = Read-Host
-    if ($rebootChoice -match '^[Yy]$') {
+    if ((Read-Host) -match '^[Yy]$') {
         Write-Host "  ⚠️  即将重启系统，请先保存所有未保存的工作!" -ForegroundColor $ColorWarning
         Write-Host "  按任意键确认重启 (或 Ctrl+C 取消)..." -ForegroundColor $ColorWarning
         $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
@@ -445,30 +289,35 @@ function Invoke-Reboot {
 }
 
 function Save-Log {
-    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-    $logPath = Join-Path $scriptDir "install_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-    $script:installLog | Out-File -FilePath $logPath -Encoding UTF8
-    Write-Host "`n  📄 安装日志已保存到: $logPath" -ForegroundColor $ColorInfo
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    $path = Join-Path $dir "install_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+    $script:installLog | Out-File -FilePath $path -Encoding UTF8
+    Write-Host "`n  📄 安装日志已保存到: $path" -ForegroundColor $ColorInfo
 }
 
+# 等待按键
+function Pause-Key { Write-Host "`n  按任意键返回主菜单..." -ForegroundColor $ColorInfo; $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") }
+
 # ========================== 主菜单 ==========================
+$menu = [ordered]@{
+    '1' = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
+    '2' = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
+    '3' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
+    '4' = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
+    '5' = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
+    '6' = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
+    '7' = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
+    '8' = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
+    '9' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+}
+
 function Show-Menu {
     Write-Title
-    
     Write-Host "  请选择要执行的操作:" -ForegroundColor $ColorInfo
     Write-Host ""
-    Write-Host "    [1]  🚀 一键安装全部 (推荐)" -ForegroundColor "Green"
-    Write-Host "    [2]  🔧 仅安装 Git" -ForegroundColor $ColorMenu
-    Write-Host "    [3]  🐍 仅安装 Python" -ForegroundColor $ColorMenu
-    Write-Host "    [4]  ☕ 仅安装 Java (JDK)" -ForegroundColor $ColorMenu
-    Write-Host "    [5]  ⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)" -ForegroundColor $ColorMenu
-    Write-Host "    [6]  🟢 仅安装 Node.js" -ForegroundColor $ColorMenu
-    Write-Host "    [7]  🐳 仅安装 Docker" -ForegroundColor $ColorMenu
-    Write-Host "    [8]  📝 仅安装 VS Code" -ForegroundColor $ColorMenu
-    Write-Host "    [9]  📋 查看当前环境摘要" -ForegroundColor $ColorMenu
+    foreach ($k in $menu.Keys) { Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu }) }
     Write-Host "    [0]  ❌ 退出" -ForegroundColor $ColorMenu
-    Write-Host ""
-    Write-Host "  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
+    Write-Host "`n  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
     Write-Host "  请输入选项 [0-9]: " -NoNewline -ForegroundColor $ColorPrompt
 }
 
@@ -476,78 +325,16 @@ function Show-Menu {
 do {
     Show-Menu
     $choice = Read-Host
-    
     Clear-Host
     Write-Title
     
-    switch ($choice) {
-        '1' { 
-            Install-All 
-            Save-Log
-            Write-Host "`n  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '2' { 
-            $actionTaken = Install-Git
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ Git — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '3' { 
-            $actionTaken = Install-Python
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ Python — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '4' { 
-            $actionTaken = Install-Java
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ Java — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '5' { 
-            $actionTaken = Install-CPP
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ C/C++ 开发工具 — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '6' { 
-            $actionTaken = Install-NodeJS
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ Node.js — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '7' { 
-            $actionTaken = Install-Docker
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ Docker — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '8' { 
-            $actionTaken = Install-VSCode
-            if ($actionTaken) { Update-SessionPath }
-            Write-Host "`n  ✅ VS Code — 操作完成。" -ForegroundColor $ColorSuccess
-            Write-Host "  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '9' { 
-            Show-Summary
-            Write-Host "`n  按任意键返回主菜单..." -ForegroundColor $ColorInfo
-            $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
-        '0' { 
-            Write-Host "`n  👋 再见! 祝你编码愉快~" -ForegroundColor $ColorTitle
-            exit
-        }
-        default {
-            Write-Host "`n  ❌ 无效选项，请重新选择。" -ForegroundColor $ColorError
-            Start-Sleep -Seconds 1
-        }
+    if ($choice -eq '0') { Write-Host "`n  👋 再见! 祝你编码愉快~" -ForegroundColor $ColorTitle; exit }
+    elseif ($menu.ContainsKey($choice)) {
+        & $menu[$choice].Action
+        Pause-Key
+    }
+    else {
+        Write-Host "`n  ❌ 无效选项，请重新选择。" -ForegroundColor $ColorError
+        Start-Sleep -Seconds 1
     }
 } while ($true)

@@ -1,4 +1,4 @@
-# 🛠️ 开发环境一键配置工具 v1.0
+# 🛠️ 开发环境一键配置工具 v1.1
 
 适用于 **Windows 10/11** 的开发环境快速部署工具，通过 Windows 包管理器 (winget) 自动安装主流开发工具。
 
@@ -11,7 +11,7 @@
 | 版本控制 | **Git** | `Git.Git` | 最新稳定版 |
 | 编程语言 | **Python 3.12** | `Python.Python.3.12` | 自动安装 pip |
 | 编程语言 | **Java JDK 21 LTS** | `EclipseAdoptium.Temurin.21.JDK` | 自动配置 `JAVA_HOME` |
-| 编程语言 | **C/C++ (GCC/G++)** | `BrechtSanders.WinLibs` | MinGW-w64，替代方案：MSVC / Clang |
+| 编程语言 | **C/C++ (GCC/G++)** | `WinLibs.GCC`（优先） / `MSYS2.MSYS2`（回退） | MinGW-w64 多 ID 回退，替代方案：MSVC / Clang |
 | 构建工具 | **CMake** | `Kitware.CMake` | 最新版 |
 | 运行时 | **Node.js LTS** | `OpenJS.NodeJS.LTS` | 自动安装 npm |
 | 容器 | **Docker Desktop** | `Docker.DockerDesktop` | 需要系统重启 |
@@ -27,18 +27,27 @@
 - 🔄 **智能版本检测** — 已安装工具显示当前版本，Y=升级覆盖 / N=跳过保留
 - 📋 **环境摘要** — 菜单选项 `[9]`，检测 12 项组件安装状态
 
-### ✅ 安全设计 (v1.0 审计通过)
+### ✅ 安全设计 (v1.1 审计通过)
 - **零命令注入** — 全脚本使用 ScriptBlock `{}` + `&` 调用操作符，无 `Invoke-Expression`
 - **零参数注入** — 所有 `winget install --id` 的 PackageId 为硬编码常量，不接受外部输入
 - **零路径遍历** — 日志路径由 `Get-Date` 格式化生成，用户输入不参与路径拼接
 - **安全重启** — `Invoke-Reboot` 移除 `-Force` 并增加二次确认提示，防止数据丢失
-- **输入校验** — 所有 Read-Host 输入仅做布尔匹配 `-match '^[Yy]$'` 或精确 switch 匹配
+- **输入校验** — 所有 Read-Host 输入仅做布尔匹配 `-match '^[Yy]$'` 或精确 `menu.ContainsKey` 匹配
+- **死代码清理** — 移除未使用的 `Test-InternetConnection` 函数
+
+### ✅ 代码精简 (v1.1)
+- **switch 冗余消除** — 7 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
+- **按任意键重复消除** — 9 处重复代码提取为 `Pause-Key` 函数（1 行调用）
+- **Show-Summary 循环驱动** — 12 次重复检测改为 `foreach` 遍历 `$tools` 数组
+- **Update-Path 集中管理** — PATH 刷新统一在 `Invoke-Installer` 内部调用
+- **总行数**: 677 → 340（↓50%）
 
 ### ✅ 其他特性
 - 🎨 彩色终端输出，每步带时间戳
 - 🔧 自动刷新 `PATH` 环境变量
 - 📄 安装日志自动保存 (`install_log_YYYYMMDD_HHmmss.txt`)
-- 🔌 管理员权限智能检测 (可非管理员运行，但会给出警告)
+- 🔌 管理员权限智能检测（可非管理员运行，但会给出警告）
+- 🌐 网络故障自动诊断（区分 winget 源不可达 / 包未找到 / 安装失败）
 
 ---
 
@@ -46,8 +55,14 @@
 
 ```
 dev_env_setup/
-├── setup_dev_env.ps1      # PowerShell 主脚本 (553行)
-├── 启动配置工具.bat         # 便捷启动器 (推荐使用)
+├── 启动配置工具.bat        # 中文名启动器（双击即可, 推荐）
+├── launch.bat             # 纯英文启动器（双击即可）
+├── setup_dev_env.ps1      # PowerShell 主脚本（340 行, 精简版）
+├── validate.ps1           # 代码审查脚本（35 项检查）
+├── b64.txt                # 主脚本的 Base64 编码（跨机传输用）
+├── decode.ps1             # 解码器：从 b64.txt 还原 setup_dev_env.ps1
+├── encode.ps1             # 编码器（开发者用，用户无需关心）
+├── LICENSE                # MIT 许可证
 └── README.md              # 本说明文件
 ```
 
@@ -55,11 +70,10 @@ dev_env_setup/
 
 ## 使用方法
 
-### 方法一：右键管理员运行 (推荐)
+### 🖥️ 本机直接使用
 
-1. 找到 `启动配置工具.bat`
-2. **右键 → 以管理员身份运行**
-3. 在菜单界面选择操作：
+1. 双击 `启动配置工具.bat` 或 `launch.bat`（建议**右键 → 以管理员身份运行**）
+2. 在菜单界面选择操作：
 
 ```
   [1]  🚀 一键安装全部 (推荐)
@@ -74,7 +88,19 @@ dev_env_setup/
   [0]  ❌ 退出
 ```
 
-### 方法二：PowerShell 命令行运行
+### 📦 从其他机器/虚拟机复制到主机
+
+直接复制 `.ps1` 文件会因为编码问题导致中文乱码。请按以下步骤操作：
+
+1. **将整个 `dev_env_setup` 文件夹** 复制到目标主机
+2. **先双击运行 `decode.ps1`**（右键 → 用 PowerShell 运行），从 `b64.txt` 还原出正确的 `setup_dev_env.ps1`
+3. **再右键管理员运行 `launch.bat`** 启动工具
+
+> **为什么需要这样？**  
+> `setup_dev_env.ps1` 含大量中文注释和菜单提示。通过 U盘/共享文件夹/剪贴板 复制时，Windows 可能会改变文件编码（UTF-8 → ANSI），导致 PowerShell 解析失败。  
+> `b64.txt` 是纯 ASCII 文本，任何传输方式都不会损坏；`decode.ps1` 负责将其还原为正确的 UTF-8 脚本。
+
+### ⌨️ PowerShell 命令行运行
 
 ```powershell
 # 以管理员身份打开 PowerShell，cd 到脚本目录后执行：
@@ -102,7 +128,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 1. 检查该工具是否已安装
 2. 如已安装则展示**当前版本**，询问是否重新安装/升级 (Y/N)
 3. 如未安装则通过 winget 下载安装
-4. 更新 PATH 环境变量
+4. 通过 `Invoke-Installer` 统一刷新 `PATH`（`Update-Path`）
 
 安装完成后：
 - 展示 **12 项环境检测摘要** (Git/Python/pip/Java/javac/GCC/G++/Node.js/npm/Docker/CMake/VS Code)
@@ -120,7 +146,19 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | 2 | `clang --version` | 检测 Clang/LLVM |
 | 3 | `vswhere.exe` + 安装目录扫描 | 检测 Visual Studio MSVC (cl.exe 不在系统 PATH 中) |
 
-若三种编译器均已存在，脚本会提示跳过。若均不存在，则自动安装 MinGW-w64 (BrechtSanders.WinLibs)。
+若三种编译器均已存在，脚本会提示跳过。若均不存在，则自动安装 MinGW-w64（多 ID 回退：WinLibs.GCC 优先 → MSYS2 回退）。
+
+---
+
+## 错误处理
+
+| 错误类型 | 现象 | 原因 |
+|----------|------|------|
+| **网络不可达** | `InternetOpenUrl() failed. 0x80072efd` | 机器无法访问外网，winget 无法下载 |
+| **包未找到** | `No package found matching input criteria` | winget 源中不存在该包 ID |
+| **编码损坏** | `Unexpected token` / `字符串缺少终止符` / 乱码 | `.ps1` 文件 UTF-8 编码被破坏 |
+
+> 遇到编码损坏：删除 `setup_dev_env.ps1`，双击 `decode.ps1` 重新还原。
 
 ---
 
@@ -148,7 +186,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 ## 安全审计摘要
 
-v1.0 已完成逐函数安全审计，审计维度：
+v1.1 已完成逐函数安全审计（validate.ps1，35 项检查），审计维度：
 
 | 攻击面 | 检查点 | 结果 |
 |--------|--------|------|
@@ -156,7 +194,7 @@ v1.0 已完成逐函数安全审计，审计维度：
 | 参数注入 | 7 处 `winget install --id` | ✅ 全部硬编码 |
 | 路径遍历 | 日志/文件路径操作 | ✅ 不可控 |
 | 代码注入 | 全脚本 | ✅ 零 `Invoke-Expression` |
-| 用户输入 | 13 处 Read-Host | ✅ 正则 + switch |
+| 用户输入 | 13 处 Read-Host | ✅ 正则 + menu.ContainsKey |
 
 **结论: 0 个高危漏洞，0 个中危漏洞，可安全使用。**
 
