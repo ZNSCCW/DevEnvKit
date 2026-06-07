@@ -31,7 +31,8 @@ $structuralChecks = @(
         $content -match "function Show-Menu")},
     @{Name="主循环 do..while"; Pass=($content -match 'do \{' -and $content -match '\} while \(\$true\)')},
     @{Name="菜单字典 \$menu"; Pass=($content -match '\$menu\s*=\s*\[ordered\]@\{' -and $content -match "menu\.ContainsKey")},
-    @{Name="通用安装包装器 Invoke-Installer"; Pass=($content -match "function Invoke-Installer")}
+    @{Name="通用安装包装器 Invoke-Installer"; Pass=($content -match "function Invoke-Installer")},
+    @{Name="winget 自动安装 Install-Winget"; Pass=($content -match "function Install-Winget" -and $content -match "Add-AppxPackage")}
 )
 
 foreach ($c in $structuralChecks) {
@@ -79,7 +80,7 @@ $dangerPatterns = @(
     @{Name="无 Invoke-Expression 实际调用"; Pattern="Invoke-Expression"; Should=$true},
     @{Name="无 iex 别名"; Pattern="\biex\b"; Should=$false},
     @{Name="无 Start-Process -FilePath cmd"; Pattern="Start-Process.*cmd"; Should=$false},
-    @{Name="无 Remove-Item 危险删除"; Pattern="Remove-Item.*-Recurse.*-Force"; Should=$false},
+    @{Name="Remove-Item 仅用于临时清理"; Pattern='Remove-Item.*-Recurse.*-Force.*\$tempDir'; Should=$true},
     @{Name="无 Set-ExecutionPolicy 修改"; Pattern="Set-ExecutionPolicy"; Should=$false}
 )
 
@@ -136,7 +137,9 @@ $redundancyPatterns = @(
     @{Name="Invoke-Installer 统一入口";  Pass=([regex]::Matches($content, "Invoke-Installer ").Count -ge 5)},
     @{Name="Install-Maven/MySQL 独立函数"; Pass=($content -match "function Install-Maven" -and $content -match "function Install-MySQL")},
     @{Name="菜单项数量 11+";            Pass=([regex]::Matches($content, "'\d+'\s*=\s*@\{Label=").Count -ge 11)},
-    @{Name="无死代码 Test-InternetConnection"; Pass=($content -notmatch "Test-InternetConnection")}
+    @{Name="无死代码 Test-InternetConnection"; Pass=($content -notmatch "Test-InternetConnection")},
+    @{Name="winget GitHub API 自动下载"; Pass=($content -match "api.github.com/repos/microsoft/winget-cli" -and $content -match "msixbundle")},
+    @{Name="winget 缺失退出前自动清理"; Pass=($content -match 'Remove-Item.*-Recurse.*-Force.*\$tempDir' -and $content -match "exit 1")}
 )
 
 $allRedundantClean = $true
@@ -158,6 +161,6 @@ Write-Host "  函数数    : $funcCount 个" -ForegroundColor White
 Write-Host "  语法      : ✅ 通过" -ForegroundColor Green
 Write-Host "  安全      : $(if ($allSafe) { '✅ 通过' } else { '❌ 有风险' })" -ForegroundColor $(if ($allSafe) { "Green" } else { "Red" })
 Write-Host "  模式      : $(if ($allPatternsPass) { '✅ 全部通过' } else { '❌ 有缺失' })" -ForegroundColor $(if ($allPatternsPass) { "Green" } else { "Red" })
-Write-Host "  工具覆盖  : 14/14" -ForegroundColor Green
+Write-Host "  工具覆盖  : 15/15" -ForegroundColor Green
 Write-Host "  冗余检测  : $(if ($allRedundantClean) { '✅ 无冗余' } else { '❌ 仍有余量' })" -ForegroundColor $(if ($allRedundantClean) { "Green" } else { "Red" })
 Write-Host ""

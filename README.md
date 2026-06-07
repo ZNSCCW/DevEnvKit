@@ -50,6 +50,7 @@
 - 📄 安装日志自动保存 (`install_log_YYYYMMDD_HHmmss.txt`)
 - 🔌 管理员权限智能检测（可非管理员运行，但会给出警告）
 - 🌐 网络故障自动诊断（区分 winget 源不可达 / 包未找到 / 安装失败）
+- ⚙️ **winget 自动安装** — 检测到缺失时自动从 GitHub Release 下载安装，失败则回退打开下载页
 
 ---
 
@@ -60,6 +61,13 @@
 - 自动检测 `mvn` 命令并显示版本
 - 自动搜索安装目录并配置 `MAVEN_HOME` 环境变量
 - 支持已安装版本的升级覆盖确认
+
+### ⚙️ winget 自动安装
+- 脚本启动时自动检测 `winget` 命令是否可用
+- 如未检测到，自动调用 GitHub API 获取最新 `microsoft/winget-cli` Release
+- 下载 `.msixbundle` 安装包并通过 `Add-AppxPackage` 安装
+- 安装后刷新 PATH 并验证可用性
+- 若 GitHub API 超时或网络不可达，回退打开 `https://aka.ms/getwinget` 下载页面
 
 ### 🗄️ MySQL Community Server
 - 通过 `Oracle.MySQL` winget 包安装
@@ -191,7 +199,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | 要求 | 说明 |
 |------|------|
 | 操作系统 | Windows 10 1809+ 或 Windows 11 |
-| winget | 系统自带 (Win10 1809+)，若缺失请安装 [应用安装程序](https://apps.microsoft.com/detail/9nblggh4nns1) |
+| winget | 系统自带 (Win10 1809+)。**若缺失，脚本会自动从 GitHub Release 下载安装** |
 | 权限 | 推荐以**管理员权限**运行 |
 | 网络 | 需要网络连接 (用于 winget 下载安装包) |
 
@@ -205,7 +213,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 4. 非管理员权限运行时，部分安装可能因 UAC 失败
 5. 安装日志默认保存在脚本同目录下 (`install_log_YYYYMMDD_HHmmss.txt`)
 6. 如遇 winget 源问题，可先执行 `winget source update` 更新源
-7. 脚本启动时会自动检测 winget 是否可用，不可用则提示退出
+7. 脚本启动时会自动检测 winget 是否可用，不可用时从 GitHub Release 自动下载安装
 
 ---
 
