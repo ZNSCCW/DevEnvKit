@@ -1,7 +1,7 @@
 <#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.1
-  支持: Python / Java / C/C++ / Node.js / Git / Docker 等
+  🛠️  开发环境一键配置工具  v1.2
+  支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
 #>
@@ -48,8 +48,8 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.1           ║
-  ║     Python · Java · C/C++ · Node.js · Git · Docker · ...    ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.2           ║
+  ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
 "@
@@ -237,13 +237,57 @@ function Install-VSCode {
         -DisplayName "Visual Studio Code" -TargetDesc "VS Code (最新稳定版)" -VersionCmd { code --version }
 }
 
+function Install-Maven {
+    Write-Host "`n  ── 🏗️  Maven ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    if (Test-CommandExists "mvn") {
+        $ver = Get-InstalledVersion { mvn --version 2>&1 }
+        if (-not (Request-Confirmation -ToolName "Maven" -InstalledVersion $ver -TargetDesc "Apache Maven 3.x (winget 最新版)")) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId "Apache.Maven.3" -DisplayName "Apache Maven 3"
+    Update-Path
+    # 设置 MAVEN_HOME
+    try {
+        $mavenPaths = @("C:\Program Files\Apache\Maven\", "C:\Program Files (x86)\Apache\Maven\")
+        foreach ($base in $mavenPaths) {
+            $found = Get-ChildItem $base -Directory -Filter "apache-maven-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+            if ($found) {
+                [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $found.FullName, "Machine")
+                Write-OK "MAVEN_HOME 已设置为: $($found.FullName)" -NoCount
+                break
+            }
+        }
+    } catch { Write-Warn "MAVEN_HOME 设置失败，请手动配置" }
+    return $r
+}
+
+function Install-MySQL {
+    Write-Host "`n  ── 🗄️  MySQL ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    if (Test-CommandExists "mysql") {
+        $ver = Get-InstalledVersion { mysql --version }
+        if (-not (Request-Confirmation -ToolName "MySQL" -InstalledVersion $ver -TargetDesc "MySQL Community Server (winget 最新版)")) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId "Oracle.MySQL" -DisplayName "MySQL Community Server"
+    Update-Path
+    if ($r) {
+        Write-Info "MySQL 安装完成。首次使用请执行初始化:"
+        Write-Info "  1. 打开 MySQL Installer 或命令行"
+        Write-Info "  2. 运行: mysqld --initialize --console  (生成随机 root 密码)"
+        Write-Info "  3. 运行: mysql_secure_installation       (修改密码 + 安全加固)"
+    }
+    return $r
+}
+
 function Install-All {
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
     Write-Host "  ║         🚀  开 始 一 键 安 装 所 有 工 具                  ║" -ForegroundColor "Red"
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor "Red"
-    $script:totalSteps = 7; $script:completedSteps = 0
+    $script:totalSteps = 9; $script:completedSteps = 0
     $startTime = Get-Date
-    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode
+    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode; Install-Maven; Install-MySQL
     $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
     Write-Host "  ║        $(if ($script:completedSteps -ge $script:totalSteps) { '✅  所有工具已就绪，无需额外安装!' } else { '🎉  安装流程完成!' })                              ║" -ForegroundColor $ColorSuccess
@@ -263,11 +307,13 @@ function Show-Summary {
         @{L="pip";      C={ pip --version }},
         @{L="Java";     C={ java -version 2>&1 }},
         @{L="javac";    C={ javac --version }},
+        @{L="Maven";    C={ mvn --version 2>&1 }},
         @{L="GCC";      C={ gcc --version }},
         @{L="G++";      C={ g++ --version }},
         @{L="Node.js";  C={ node --version }},
         @{L="npm";      C={ npm --version }},
         @{L="Docker";   C={ docker --version }},
+        @{L="MySQL";    C={ mysql --version }},
         @{L="CMake";    C={ cmake --version }},
         @{L="VS Code";  C={ code --version }}
     )
@@ -300,15 +346,17 @@ function Pause-Key { Write-Host "`n  按任意键返回主菜单..." -Foreground
 
 # ========================== 主菜单 ==========================
 $menu = [ordered]@{
-    '1' = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
-    '2' = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
-    '3' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
-    '4' = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
-    '5' = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
-    '6' = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
-    '7' = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
-    '8' = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
-    '9' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+    '1'  = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
+    '2'  = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
+    '3'  = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
+    '4'  = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
+    '5'  = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
+    '6'  = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
+    '7'  = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
+    '8'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
+    '9'  = @{Label="🏗️  仅安装 Maven"; Action={ $null = Install-Maven }}
+    '10' = @{Label="🗄️  仅安装 MySQL"; Action={ $null = Install-MySQL }}
+    '11' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
 }
 
 function Show-Menu {
@@ -318,7 +366,7 @@ function Show-Menu {
     foreach ($k in $menu.Keys) { Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu }) }
     Write-Host "    [0]  ❌ 退出" -ForegroundColor $ColorMenu
     Write-Host "`n  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
-    Write-Host "  请输入选项 [0-9]: " -NoNewline -ForegroundColor $ColorPrompt
+    Write-Host "  请输入选项 [0-$($menu.Keys.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
 }
 
 # ========================== 主循环 ==========================

@@ -1,4 +1,4 @@
-# 🛠️ 开发环境一键配置工具 v1.1
+# 🛠️ 开发环境一键配置工具 v1.2
 
 适用于 **Windows 10/11** 的开发环境快速部署工具，通过 Windows 包管理器 (winget) 自动安装主流开发工具。
 
@@ -13,8 +13,10 @@
 | 编程语言 | **Java JDK 21 LTS** | `EclipseAdoptium.Temurin.21.JDK` | 自动配置 `JAVA_HOME` |
 | 编程语言 | **C/C++ (GCC/G++)** | `WinLibs.GCC`（优先） / `MSYS2.MSYS2`（回退） | MinGW-w64 多 ID 回退，替代方案：MSVC / Clang |
 | 构建工具 | **CMake** | `Kitware.CMake` | 最新版 |
+| 构建工具 | **Apache Maven** | `Apache.Maven.3` | 自动配置 `MAVEN_HOME` |
 | 运行时 | **Node.js LTS** | `OpenJS.NodeJS.LTS` | 自动安装 npm |
 | 容器 | **Docker Desktop** | `Docker.DockerDesktop` | 需要系统重启 |
+| 数据库 | **MySQL Community** | `Oracle.MySQL` | 需手动初始化 root 密码 |
 | 编辑器 | **Visual Studio Code** | `Microsoft.VisualStudioCode` | 最新稳定版 |
 
 ---
@@ -22,12 +24,12 @@
 ## 特性
 
 ### ✅ 核心功能
-- 🚀 **一键安装全部** — 菜单选项 `[1]`，7 个工具全自动部署
-- 🎯 **选择性安装** — 菜单选项 `[2]~[8]`，单独安装某个工具
+- 🚀 **一键安装全部** — 菜单选项 `[1]`，9 个工具全自动部署
+- 🎯 **选择性安装** — 菜单选项 `[2]~[10]`，单独安装某个工具
 - 🔄 **智能版本检测** — 已安装工具显示当前版本，Y=升级覆盖 / N=跳过保留
-- 📋 **环境摘要** — 菜单选项 `[9]`，检测 12 项组件安装状态
+- 📋 **环境摘要** — 菜单选项 `[11]`，检测 14 项组件安装状态
 
-### ✅ 安全设计 (v1.1 审计通过)
+### ✅ 安全设计 (v1.2 审计通过)
 - **零命令注入** — 全脚本使用 ScriptBlock `{}` + `&` 调用操作符，无 `Invoke-Expression`
 - **零参数注入** — 所有 `winget install --id` 的 PackageId 为硬编码常量，不接受外部输入
 - **零路径遍历** — 日志路径由 `Get-Date` 格式化生成，用户输入不参与路径拼接
@@ -35,12 +37,12 @@
 - **输入校验** — 所有 Read-Host 输入仅做布尔匹配 `-match '^[Yy]$'` 或精确 `menu.ContainsKey` 匹配
 - **死代码清理** — 移除未使用的 `Test-InternetConnection` 函数
 
-### ✅ 代码精简 (v1.1)
-- **switch 冗余消除** — 7 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
-- **按任意键重复消除** — 9 处重复代码提取为 `Pause-Key` 函数（1 行调用）
-- **Show-Summary 循环驱动** — 12 次重复检测改为 `foreach` 遍历 `$tools` 数组
+### ✅ 代码精简 (v1.2)
+- **switch 冗余消除** — 9 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
+- **按任意键重复消除** — 11 处重复代码提取为 `Pause-Key` 函数（1 行调用）
+- **Show-Summary 循环驱动** — 14 次重复检测改为 `foreach` 遍历 `$tools` 数组
 - **Update-Path 集中管理** — PATH 刷新统一在 `Invoke-Installer` 内部调用
-- **总行数**: 677 → 340（↓50%）
+- **总行数**: 677 → 388（↓43%）
 
 ### ✅ 其他特性
 - 🎨 彩色终端输出，每步带时间戳
@@ -51,13 +53,31 @@
 
 ---
 
+## 新增功能 (v1.2)
+
+### 🏗️ Apache Maven
+- 通过 `Apache.Maven.3` winget 包安装
+- 自动检测 `mvn` 命令并显示版本
+- 自动搜索安装目录并配置 `MAVEN_HOME` 环境变量
+- 支持已安装版本的升级覆盖确认
+
+### 🗄️ MySQL Community Server
+- 通过 `Oracle.MySQL` winget 包安装
+- 自动检测 `mysql` 命令并显示版本
+- 安装后提供首次使用初始化指引：
+  1. 打开 MySQL Installer 或命令行
+  2. 运行 `mysqld --initialize --console` 生成随机 root 密码
+  3. 运行 `mysql_secure_installation` 修改密码 + 安全加固
+
+---
+
 ## 文件结构
 
 ```
 dev_env_setup/
 ├── 启动配置工具.bat        # 中文名启动器（双击即可, 推荐）
 ├── launch.bat             # 纯英文启动器（双击即可）
-├── setup_dev_env.ps1      # PowerShell 主脚本（340 行, 精简版）
+├── setup_dev_env.ps1      # PowerShell 主脚本（388 行, 精简版）
 ├── validate.ps1           # 代码审查脚本（35 项检查）
 ├── b64.txt                # 主脚本的 Base64 编码（跨机传输用）
 ├── decode.ps1             # 解码器：从 b64.txt 还原 setup_dev_env.ps1
@@ -84,7 +104,9 @@ dev_env_setup/
   [6]  🟢 仅安装 Node.js
   [7]  🐳 仅安装 Docker
   [8]  📝 仅安装 VS Code
-  [9]  📋 查看当前环境摘要
+  [9]  🏗️  仅安装 Maven
+  [10] 🗄️  仅安装 MySQL
+  [11] 📋 查看当前环境摘要
   [0]  ❌ 退出
 ```
 
@@ -122,6 +144,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
   5. Node.js LTS  → 检测版本 → 确认 → 安装 → 验证 npm
   6. Docker       → 检测版本 → 确认 → 安装
   7. VS Code      → 检测版本 → 确认 → 安装
+  8. Maven        → 检测版本 → 确认 → 安装 → 配置 MAVEN_HOME
+  9. MySQL        → 检测版本 → 确认 → 安装 → 初始化指引
 ```
 
 每个步骤都会：
@@ -131,7 +155,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 4. 通过 `Invoke-Installer` 统一刷新 `PATH`（`Update-Path`）
 
 安装完成后：
-- 展示 **12 项环境检测摘要** (Git/Python/pip/Java/javac/GCC/G++/Node.js/npm/Docker/CMake/VS Code)
+- 展示 **14 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code)
 - 询问是否**立即重启**（Docker Desktop 需要重启生效，会先提示保存工作）
 
 ---
@@ -176,22 +200,23 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 ## 注意事项
 
 1. **Docker Desktop** 安装后需要**重启系统**才能完全生效
-2. 部分工具 (如 MinGW-w64) 安装后，在新终端中才会加载最新的 PATH
-3. 非管理员权限运行时，部分安装可能因 UAC 失败
-4. 安装日志默认保存在脚本同目录下 (`install_log_YYYYMMDD_HHmmss.txt`)
-5. 如遇 winget 源问题，可先执行 `winget source update` 更新源
-6. 脚本启动时会自动检测 winget 是否可用，不可用则提示退出
+2. **MySQL** 安装后需手动执行 `mysqld --initialize` 和 `mysql_secure_installation` 完成初始化
+3. 部分工具 (如 MinGW-w64、Maven) 安装后，在新终端中才会加载最新的 PATH
+4. 非管理员权限运行时，部分安装可能因 UAC 失败
+5. 安装日志默认保存在脚本同目录下 (`install_log_YYYYMMDD_HHmmss.txt`)
+6. 如遇 winget 源问题，可先执行 `winget source update` 更新源
+7. 脚本启动时会自动检测 winget 是否可用，不可用则提示退出
 
 ---
 
 ## 安全审计摘要
 
-v1.1 已完成逐函数安全审计（validate.ps1，35 项检查），审计维度：
+v1.2 已完成逐函数安全审计（validate.ps1，35 项检查），审计维度：
 
 | 攻击面 | 检查点 | 结果 |
 |--------|--------|------|
-| 命令注入 | 14 处 `&` ScriptBlock 调用 | ✅ 安全 |
-| 参数注入 | 7 处 `winget install --id` | ✅ 全部硬编码 |
+| 命令注入 | 16 处 `&` ScriptBlock 调用 | ✅ 安全 |
+| 参数注入 | 11 处 `winget install --id` | ✅ 全部硬编码 |
 | 路径遍历 | 日志/文件路径操作 | ✅ 不可控 |
 | 代码注入 | 全脚本 | ✅ 零 `Invoke-Expression` |
 | 用户输入 | 13 处 Read-Host | ✅ 正则 + menu.ContainsKey |

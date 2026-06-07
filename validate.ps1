@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $scriptPath = Join-Path $PSScriptRoot "setup_dev_env.ps1"
 
 Write-Host "`n  ═══════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "    setup_dev_env.ps1 代码审查 (精简版 v1.1)" -ForegroundColor Cyan
+Write-Host "    setup_dev_env.ps1 代码审查 (精简版 v1.2)" -ForegroundColor Cyan
 Write-Host "  ═══════════════════════════════════════════`n" -ForegroundColor Cyan
 
 # === 1. 语法检查 ===
@@ -56,6 +56,7 @@ $patternChecks = @(
     @{Name="管理员权限检查"; Pass=($content -match 'WindowsPrincipal')},
     @{Name="winget 可用性检查"; Pass=($content -match 'Get-Command winget')},
     @{Name="JAVA_HOME 设置"; Pass=($content -match 'JAVA_HOME')},
+    @{Name="MAVEN_HOME 设置"; Pass=($content -match 'MAVEN_HOME')},
     @{Name="安装日志保存"; Pass=($content -match 'Save-Log|install_log_')},
     @{Name="WinLibs 优先 MSYS2"; Pass=($content -match "WinLibs.GCC") -and ($content.IndexOf("WinLibs.GCC") -lt $content.IndexOf("MSYS2.MSYS2"))},
     @{Name="MSYS2 PATH 手动追加"; Pass=($content -match "msys64\\\\mingw64\\\\bin" -or $content -match 'msys64\\mingw64\\bin')},
@@ -107,7 +108,9 @@ $tools = @(
     @{Name="npm";      Install="";                              Summary="npm --version"},
     @{Name="Docker";   Install="Docker.DockerDesktop";          Summary="docker --version"},
     @{Name="CMake";    Install="Kitware.CMake";                 Summary="cmake --version"},
-    @{Name="VS Code";  Install="Microsoft.VisualStudioCode";    Summary="code --version"}
+    @{Name="VS Code";  Install="Microsoft.VisualStudioCode";    Summary="code --version"},
+    @{Name="Maven";    Install="Apache.Maven.3";                Summary="mvn --version"},
+    @{Name="MySQL";    Install="Oracle.MySQL";                  Summary="mysql --version"}
 )
 
 foreach ($t in $tools) {
@@ -131,6 +134,8 @@ $redundancyPatterns = @(
     @{Name="Show-Summary 循环驱动";     Pass=($content -match 'foreach \(\$t in \$tools\)' -and $content -match '& \$t\.C')},
     @{Name="Update-Path 集中管理";      Pass=($content -match "function Invoke-Installer" -and $content -match "Update-Path")},
     @{Name="Invoke-Installer 统一入口";  Pass=([regex]::Matches($content, "Invoke-Installer ").Count -ge 5)},
+    @{Name="Install-Maven/MySQL 独立函数"; Pass=($content -match "function Install-Maven" -and $content -match "function Install-MySQL")},
+    @{Name="菜单项数量 11+";            Pass=([regex]::Matches($content, "'\d+'\s*=\s*@\{Label=").Count -ge 11)},
     @{Name="无死代码 Test-InternetConnection"; Pass=($content -notmatch "Test-InternetConnection")}
 )
 
@@ -153,6 +158,6 @@ Write-Host "  函数数    : $funcCount 个" -ForegroundColor White
 Write-Host "  语法      : ✅ 通过" -ForegroundColor Green
 Write-Host "  安全      : $(if ($allSafe) { '✅ 通过' } else { '❌ 有风险' })" -ForegroundColor $(if ($allSafe) { "Green" } else { "Red" })
 Write-Host "  模式      : $(if ($allPatternsPass) { '✅ 全部通过' } else { '❌ 有缺失' })" -ForegroundColor $(if ($allPatternsPass) { "Green" } else { "Red" })
-Write-Host "  工具覆盖  : 12/12" -ForegroundColor Green
+Write-Host "  工具覆盖  : 14/14" -ForegroundColor Green
 Write-Host "  冗余检测  : $(if ($allRedundantClean) { '✅ 无冗余' } else { '❌ 仍有余量' })" -ForegroundColor $(if ($allRedundantClean) { "Green" } else { "Red" })
 Write-Host ""
