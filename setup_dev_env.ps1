@@ -13,65 +13,6 @@ if (-NOT ([System.Security.Principal.WindowsPrincipal] [System.Security.Principa
     if ((Read-Host) -notmatch '^[Yy]$') { exit }
 }
 
-# 自动安装 winget (如果缺失)
-function Install-Winget {
-    Write-Host "`n  ── ⚙️ 安装 winget 包管理器 ──────────────────────────────" -ForegroundColor $ColorMenu
-    Write-Step "未检测到 winget，正在自动下载安装..."
-    
-    $wingetUrl = "https://aka.ms/getwinget"
-    $tempDir = Join-Path $env:TEMP "winget_installer"
-    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-    
-    # 尝试从 GitHub Release 获取最新 winget
-    try {
-        Write-Info "正在获取最新 winget 版本信息..."
-        $releaseApi = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
-        $releaseInfo = Invoke-RestMethod -Uri $releaseApi -ErrorAction Stop
-        $asset = $releaseInfo.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
-        
-        if ($asset) {
-            Write-Info "下载: $($asset.name) ($([math]::Round($asset.size/1MB, 1)) MB)"
-            $installerPath = Join-Path $tempDir $asset.name
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -ErrorAction Stop
-            Write-OK "下载完成" -NoCount
-            
-            Write-Step "正在安装 winget ..."
-            Add-AppxPackage -Path $installerPath -ErrorAction Stop
-            Write-OK "winget 安装成功!" -NoCount
-            
-            # 刷新 PATH 并验证
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + 
-                        [System.Environment]::GetEnvironmentVariable("Path", "User")
-            if (Get-Command winget -ErrorAction SilentlyContinue) {
-                Write-OK "winget 已就绪" -NoCount
-                Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
-                return $true
-            }
-        }
-    }
-    catch {
-        Write-Warn "GitHub 自动下载失败: $_"
-    }
-    
-    # 回退方案: 打开 winget 下载页面
-    Write-Warn "自动安装失败，将打开 winget 下载页面..."
-    Write-Host "  ❓ 是否打开 winget 下载页面? (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
-    if ((Read-Host) -match '^[Yy]$') {
-        Write-Info "正在打开下载页面..."
-        Start-Process $wingetUrl
-    }
-    
-    Write-Host "`n  ⚠️  请手动安装 winget 后重新运行本脚本。" -ForegroundColor $ColorWarning
-    Write-Host "  按任意键退出..." -ForegroundColor Gray
-    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
-    exit 1
-}
-
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Install-Winget
-}
-
 # 控制台编码设置
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $host.UI.RawUI.WindowTitle = "开发环境一键配置工具"
@@ -184,6 +125,66 @@ function Invoke-Installer {
     $result = Invoke-WingetInstall -PackageId $PackageId -DisplayName $DisplayName
     Update-Path
     return $result
+}
+
+# 自动安装 winget (如果缺失) — 必须在所有辅助函数定义之后调用
+function Install-Winget {
+    Write-Host "`n  ── ⚙️ 安装 winget 包管理器 ──────────────────────────────" -ForegroundColor $ColorMenu
+    Write-Step "未检测到 winget，正在自动下载安装..."
+    
+    $wingetUrl = "https://aka.ms/getwinget"
+    $tempDir = Join-Path $env:TEMP "winget_installer"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    
+    # 尝试从 GitHub Release 获取最新 winget
+    try {
+        Write-Info "正在获取最新 winget 版本信息..."
+        $releaseApi = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+        $releaseInfo = Invoke-RestMethod -Uri $releaseApi -ErrorAction Stop
+        $asset = $releaseInfo.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
+        
+        if ($asset) {
+            Write-Info "下载: $($asset.name) ($([math]::Round($asset.size/1MB, 1)) MB)"
+            $installerPath = Join-Path $tempDir $asset.name
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -ErrorAction Stop
+            Write-OK "下载完成" -NoCount
+            
+            Write-Step "正在安装 winget ..."
+            Add-AppxPackage -Path $installerPath -ErrorAction Stop
+            Write-OK "winget 安装成功!" -NoCount
+            
+            # 刷新 PATH 并验证
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + 
+                        [System.Environment]::GetEnvironmentVariable("Path", "User")
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                Write-OK "winget 已就绪" -NoCount
+                Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+    }
+    catch {
+        Write-Warn "GitHub 自动下载失败: $_"
+    }
+    
+    # 回退方案: 打开 winget 下载页面
+    Write-Warn "自动安装失败，将打开 winget 下载页面..."
+    Write-Host "  ❓ 是否打开 winget 下载页面? (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
+    if ((Read-Host) -match '^[Yy]$') {
+        Write-Info "正在打开下载页面..."
+        Start-Process $wingetUrl
+    }
+    
+    Write-Host "`n  ⚠️  请手动安装 winget 后重新运行本脚本。" -ForegroundColor $ColorWarning
+    Write-Host "  按任意键退出..." -ForegroundColor Gray
+    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+    exit 1
+}
+
+# 主流程启动前检查 winget 是否可用
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Install-Winget
 }
 
 # ========================== 安装模块 ==========================
