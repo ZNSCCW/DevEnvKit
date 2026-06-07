@@ -37,12 +37,20 @@
 - **输入校验** — 所有 Read-Host 输入仅做布尔匹配 `-match '^[Yy]$'` 或精确 `menu.ContainsKey` 匹配
 - **死代码清理** — 移除未使用的 `Test-InternetConnection` 函数
 
+### ✅ 代码质量 (v1.2)
+- **JAVA_HOME 通配检测** — 移除硬编码补丁版本号 `jdk-21.0.0.35-hotspot`，统一使用 `jdk-21*` 通配
+- **MAVEN_HOME 回退推导** — 若安装目录扫描失败，自动从 `Get-Command mvn` 的路径反推 `MAVEN_HOME`
+- **winget 下载完整性校验** — 验证下载文件存在且 > 1MB，防止损坏文件通过 `Add-AppxPackage` 安装
+- **日志自动清理** — `Save-Log` 前自动清除旧日志，仅保留最近 10 个 `install_log_*.txt`
+- **`completedSteps` 语义注释** — 明确该变量计数"已就绪项"非"新安装数"
+- **退出菜单 emoji 修正** — `❌ 退出` → `👋 退出`
+
 ### ✅ 代码精简 (v1.2)
-- **switch 冗余消除** — 9 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
-- **按任意键重复消除** — 11 处重复代码提取为 `Pause-Key` 函数（1 行调用）
+- **switch 冗余消除** — 11 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
+- **按任意键重复消除** — 重复代码提取为 `Wait-Key` 函数（1 行调用）
 - **Show-Summary 循环驱动** — 14 次重复检测改为 `foreach` 遍历 `$tools` 数组
 - **Update-Path 集中管理** — PATH 刷新统一在 `Invoke-Installer` 内部调用
-- **总行数**: 677 → 388（↓43%）
+- **总行数**: 677 → 509（↓25%）
 
 ### ✅ 其他特性
 - 🎨 彩色终端输出，每步带时间戳
@@ -85,7 +93,7 @@
 dev_env_setup/
 ├── 启动配置工具.bat        # 中文名启动器（双击即可, 推荐）
 ├── launch.bat             # 纯英文启动器（双击即可）
-├── setup_dev_env.ps1      # PowerShell 主脚本（388 行, 精简版）
+├── setup_dev_env.ps1      # PowerShell 主脚本（509 行, 精简版）
 ├── validate.ps1           # 代码审查脚本（35 项检查）
 ├── b64.txt                # 主脚本的 Base64 编码（跨机传输用）
 ├── decode.ps1             # 解码器：从 b64.txt 还原 setup_dev_env.ps1
@@ -115,7 +123,7 @@ dev_env_setup/
   [9]  🏗️  仅安装 Maven
   [10] 🗄️  仅安装 MySQL
   [11] 📋 查看当前环境摘要
-  [0]  ❌ 退出
+  [0]  👋 退出
 ```
 
 ### 📦 从其他机器/虚拟机复制到主机

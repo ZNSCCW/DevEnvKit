@@ -52,7 +52,7 @@ $patternChecks = @(
     @{Name="Invoke-Installer 通用包装器"; Pass=($content -match "function Invoke-Installer")},
     @{Name="winget --disable-interactivity"; Pass=($content -match '--disable-interactivity')},
     @{Name="winget 网络错误检测"; Pass=($content -match '0x80072efd|0x80072ee7|0x80072f8f')},
-    @{Name="Pause-Key 消除重复代码"; Pass=($content -match "function Pause-Key")},
+    @{Name="Wait-Key 统一等待按键"; Pass=($content -match "function Wait-Key")},
     @{Name="UTF8 编码设置"; Pass=($content -match 'OutputEncoding.*UTF8')},
     @{Name="管理员权限检查"; Pass=($content -match 'WindowsPrincipal')},
     @{Name="winget 可用性检查"; Pass=($content -match 'Get-Command winget')},
@@ -131,7 +131,7 @@ foreach ($t in $tools) {
 Write-Host "`n  ── 冗余检测 ────────────────────────────────────────────" -ForegroundColor Cyan
 $redundancyPatterns = @(
     @{Name="无重复 switch 分支";        Pass=($content -match '\$menu\[')},
-    @{Name="无重复 '按任意键返回' 代码"; Pass=(($content -match "function Pause-Key") -and (([regex]::Matches($content, "按任意键返回").Count) -le 2))},
+    @{Name="无重复 '按 Enter 返回' 代码"; Pass=(($content -match "function Wait-Key") -and (([regex]::Matches($content, "按 Enter 返回主菜单").Count) -le 1))},
     @{Name="Show-Summary 循环驱动";     Pass=($content -match 'foreach \(\$t in \$tools\)' -and $content -match '& \$t\.C')},
     @{Name="Update-Path 集中管理";      Pass=($content -match "function Invoke-Installer" -and $content -match "Update-Path")},
     @{Name="Invoke-Installer 统一入口";  Pass=([regex]::Matches($content, "Invoke-Installer ").Count -ge 5)},

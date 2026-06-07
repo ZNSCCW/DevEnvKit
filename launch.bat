@@ -1,4 +1,6 @@
 @echo off
+chcp 65001 >nul
+title Dev Environment Setup Tool - Launcher
 cd /d "%~dp0"
 
 :: Check if setup_dev_env.ps1 exists, if not, run decode first
@@ -16,7 +18,7 @@ if not exist "setup_dev_env.ps1" (
 )
 
 echo  ============================================
-echo   Dev Environment Setup Tool v1.1
+echo   Dev Environment Setup Tool v1.2
 echo   Run as Administrator for best results!
 echo  ============================================
 echo.

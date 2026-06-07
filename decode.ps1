@@ -1,5 +1,5 @@
 # 解码脚本：在目标主机上运行，将 b64.txt 还原为 setup_dev_env.ps1
-$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptPath = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $b64File = Join-Path $scriptPath "b64.txt"
 $outFile = Join-Path $scriptPath "setup_dev_env.ps1"
 
