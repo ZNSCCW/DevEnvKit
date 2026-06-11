@@ -382,38 +382,98 @@ function Install-Maven {
     Write-AppendLog "`n  ── Maven ──"
     if (Test-CommandExists "mvn") {
         $ver = Get-InstalledVersion { mvn --version 2>&1 }
-        if (-not (Request-Confirmation -ToolName "Maven" -InstalledVersion $ver -TargetDesc "Apache Maven 3.x (winget 最新版)")) {
+        if (-not (Request-Confirmation -ToolName "Maven" -InstalledVersion $ver -TargetDesc "Apache Maven 3.x (最新稳定版)")) {
             $script:completedSteps++; return $false
         }
     }
-    $r = Invoke-WingetInstall -PackageId "Apache.Maven" -DisplayName "Apache Maven"
-    if ($r) { Update-Path }
-    # 设置 MAVEN_HOME
+    
+    Write-Step "正在安装 Apache Maven (从 Apache 官方源下载)..."
+    
+    # 获取最新稳定版 Maven 3.x 版本号
+    $mavenVersion = $null
     try {
-        $mavenHomeFound = $false
-        $mavenPaths = @("C:\Program Files\Apache\Maven\", "C:\Program Files (x86)\Apache\Maven\")
-        foreach ($base in $mavenPaths) {
-            $found = Get-ChildItem $base -Directory -Filter "apache-maven-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-            if ($found) {
-                [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $found.FullName, "Machine")
-                Write-OK "MAVEN_HOME 已设置为: $($found.FullName)" -NoCount
-                $mavenHomeFound = $true; break
-            }
+        Write-Info "正在获取最新 Maven 版本信息..."
+        $mirrorResponse = Invoke-WebRequest -Uri "https://dlcdn.apache.org/maven/maven-3/" -TimeoutSec 15 -ErrorAction Stop
+        $versionMatches = [regex]::Matches($mirrorResponse.Content, 'href="(\d+\.\d+\.\d+)/"')
+        if ($versionMatches.Count -gt 0) {
+            $latestVersion = ($versionMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object { [Version]$_ } -Descending | Select-Object -First 1)
+            if ($latestVersion) { $mavenVersion = $latestVersion }
         }
-        # 回退: 从 mvn 命令路径推导 MAVEN_HOME
-        if (-not $mavenHomeFound) {
-            $mvnCmdPath = (Get-Command mvn -ErrorAction SilentlyContinue).Source
-            if ($mvnCmdPath) {
-                $mvnBinDir = Split-Path -Parent $mvnCmdPath
-                $mvnHome = Split-Path -Parent $mvnBinDir
-                if ($mvnHome -and (Test-Path $mvnHome)) {
-                    [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $mvnHome, "Machine")
-                    Write-OK "MAVEN_HOME 已从 mvn 路径推导: $mvnHome" -NoCount
-                }
-            }
+    } catch {
+        Write-Warn "无法获取最新版本信息: $_"
+    }
+    
+    # 回退到已知的稳定版本
+    if (-not $mavenVersion) {
+        $mavenVersion = "3.9.9"
+        Write-Info "使用默认版本: $mavenVersion"
+    }
+    
+    Write-Info "目标版本: Apache Maven $mavenVersion"
+    
+    # 下载 Maven 二进制包
+    $mavenZipUrl = "https://dlcdn.apache.org/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip"
+    $tempZip = Join-Path $env:TEMP "apache-maven-$mavenVersion-bin.zip"
+    $installBase = "C:\Program Files\Apache\Maven"
+    $mavenHome = Join-Path $installBase "apache-maven-$mavenVersion"
+    
+    try {
+        # 创建安装目录
+        if (-not (Test-Path $installBase)) {
+            New-Item -ItemType Directory -Path $installBase -Force | Out-Null
         }
-    } catch { Write-Warn "MAVEN_HOME 设置失败，请手动配置" }
-    return $r
+        
+        # 下载
+        Write-Info "正在下载 Apache Maven $mavenVersion ..."
+        Invoke-WebRequest -Uri $mavenZipUrl -OutFile $tempZip -TimeoutSec 120 -ErrorAction Stop
+        
+        if (-not (Test-Path $tempZip) -or (Get-Item $tempZip).Length -lt 1MB) {
+            throw "下载文件不完整或为空"
+        }
+        Write-OK "下载完成 ($([math]::Round((Get-Item $tempZip).Length / 1MB, 1)) MB)" -NoCount
+        
+        # 解压
+        Write-Info "正在解压到 $mavenHome ..."
+        if (Test-Path $mavenHome) {
+            Remove-Item -Recurse -Force $mavenHome -ErrorAction SilentlyContinue
+        }
+        Expand-Archive -Path $tempZip -DestinationPath $installBase -Force
+        
+        if (-not (Test-Path (Join-Path $mavenHome "bin\mvn.cmd"))) {
+            throw "解压后未找到 mvn.cmd，安装可能失败"
+        }
+        Write-OK "解压完成" -NoCount
+        
+        # 清理临时文件
+        Remove-Item -Force $tempZip -ErrorAction SilentlyContinue
+        
+        # 设置 MAVEN_HOME 环境变量
+        [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $mavenHome, "Machine")
+        Write-OK "MAVEN_HOME 已设置为: $mavenHome" -NoCount
+        
+        # 将 Maven bin 目录添加到系统 PATH
+        $mavenBin = Join-Path $mavenHome "bin"
+        $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        if ($curPath -notmatch [regex]::Escape($mavenBin)) {
+            [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$mavenBin", "Machine")
+            Write-OK "已将 Maven bin 添加到系统 PATH" -NoCount
+        }
+        
+        Update-Path
+        Write-OK "Apache Maven $mavenVersion 安装成功!"
+        return $true
+    }
+    catch {
+        Write-Fail "Apache Maven 安装失败"
+        Write-Info "详情: $_"
+        
+        # 清理
+        Remove-Item -Force $tempZip -ErrorAction SilentlyContinue
+        if (Test-Path $mavenHome) {
+            Remove-Item -Recurse -Force $mavenHome -ErrorAction SilentlyContinue
+        }
+        return $false
+    }
 }
 
 function Install-MySQL {
