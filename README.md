@@ -81,10 +81,7 @@
 
 ### 🐛 Bug 修复 (v1.4)
 - **Install-CPP `completedSteps` 双倍计数修复**: 一键安装时 C/C++ 项只计 1 次
-- **b64.txt 编码同步修复**: 解决微信传输后文件编码损坏导致解析失败
-- **decode.ps1 UTF-8 BOM 修复**: 写出带 BOM 头，确保 PowerShell 5.1 正确识别
 - **`chcp` 命令缺失修复**: 批处理 stderr 屏蔽，`chcp` 不可用时不再显示错误
-- **编码损坏预防**: 启动前始终从 b64.txt 覆盖还原 .ps1 文件
 
 ---
 
@@ -126,11 +123,8 @@
 ```
 dev_env_setup/
 ├── 启动配置工具.bat        # 主启动器 (双击即可, 推荐)
-├── setup_dev_env.ps1      # PowerShell 主脚本 (~900 行)
+├── setup_dev_env.ps1      # PowerShell 主脚本 (~600 行)
 ├── validate.ps1           # 代码审查脚本 (35 项检查)
-├── b64.txt                # 主脚本的 Base64 编码 (跨机传输用)
-├── decode.ps1             # 解码器: 从 b64.txt 还原 setup_dev_env.ps1
-├── encode.ps1             # 编码器 (开发者用，用户无需关心)
 ├── logs/                  # 安装日志存放目录 (每次运行自动生成 *.txt)
 ├── LICENSE                # MIT 许可证
 └── README.md              # 本说明文件
@@ -160,18 +154,6 @@ dev_env_setup/
   [12] 📋 查看当前环境摘要
   [0]  👋 退出
 ```
-
-### 📦 从其他机器/虚拟机复制到主机
-
-直接复制 `.ps1` 文件会因为编码问题导致中文乱码。请按以下步骤操作:
-
-1. **将整个 `dev_env_setup` 文件夹** 复制到目标主机
-2. **先双击运行 `decode.ps1`** (右键 → 用 PowerShell 运行)，从 `b64.txt` 还原出正确的 `setup_dev_env.ps1`
-3. **再右键管理员运行 `启动配置工具.bat`** 启动工具
-
-> **为什么需要这样?**  
-> `setup_dev_env.ps1` 含大量中文注释和菜单提示。通过 U盘/共享文件夹/剪贴板 复制时，Windows 可能会改变文件编码 (UTF-8 → ANSI)，导致 PowerShell 解析失败。  
-> `b64.txt` 是纯 ASCII 文本，任何传输方式都不会损坏；`decode.ps1` 负责将其还原为正确的 UTF-8 脚本。
 
 ### ⌨️ PowerShell 命令行运行
 
@@ -232,10 +214,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 |----------|------|------|
 | **网络不可达** | `InternetOpenUrl() failed. 0x80072efd` | 机器无法访问外网，winget 无法下载 |
 | **包未找到** | `No package found matching input criteria` | winget 源中不存在该包 ID |
-| **编码损坏** | `Unexpected token` / `字符串缺少终止符` / 乱码 | `.ps1` 文件 UTF-8 编码被破坏 |
 | **Android 组件下载失败** | `远程服务器返回错误: (404)` | 镜像站命令字不匹配，脚本会自动从 XML 解析最新文件名 |
-
-> 遇到编码损坏: 删除 `setup_dev_env.ps1`，双击 `decode.ps1` 重新还原.
 
 ---
 
