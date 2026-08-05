@@ -1,6 +1,6 @@
 <#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.2
+  🛠️  开发环境一键配置工具  v1.3
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -18,9 +18,21 @@ if (-NOT ([System.Security.Principal.WindowsPrincipal] [System.Security.Principa
 $host.UI.RawUI.WindowTitle = "开发环境一键配置工具"
 
 # 全局变量
-$script:installLog = @()
-$script:totalSteps = 0
+# completedSteps 计数"已就绪"工具项（已安装或跳过），非"新安装数"
 $script:completedSteps = 0
+
+# ========================== 实时日志 ==========================
+# 初始化实时日志文件（防崩溃丢失），日志统一输出到 logs/ 子目录
+$script:baseDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+$script:logDir = Join-Path $script:baseDir "logs"
+if (-not (Test-Path $script:logDir)) { New-Item -ItemType Directory -Path $script:logDir -Force | Out-Null }
+$script:logFilePath = Join-Path $script:logDir "install_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+"========== 开发环境配置日志 [$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] ==========" | Out-File -FilePath $script:logFilePath -Encoding UTF8
+
+function Write-AppendLog {
+    param([string]$Message)
+    $Message | Out-File -FilePath $script:logFilePath -Append -Encoding UTF8
+}
 
 # ========================== 颜色主题 ==========================
 $ColorTitle   = "Cyan"
@@ -30,7 +42,7 @@ $ColorWarning = "Yellow"
 $ColorInfo    = "White"
 $ColorMenu    = "Magenta"
 $ColorPrompt  = "Cyan"
-$ColorStep    = "Blue"
+$ColorStep    = "Cyan"
 
 # ========================== 辅助函数 ==========================
 function Write-Title {
@@ -38,18 +50,18 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.2           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.3           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
 "@
 }
 
-function Write-Step { param([string]$m); $t = Get-Date -Format "HH:mm:ss"; Write-Host "  [$t] ▶ $m" -ForegroundColor $ColorStep; $script:installLog += "[$t] ▶ $m" }
-function Write-OK   { param([string]$m, [switch]$NoCount); Write-Host "              ✅ $m" -ForegroundColor $ColorSuccess; $script:installLog += "              ✅ $m"; if (-not $NoCount) { $script:completedSteps++ } }
-function Write-Fail { param([string]$m); Write-Host "              ❌ $m" -ForegroundColor $ColorError;   $script:installLog += "              ❌ $m" }
-function Write-Warn { param([string]$m); Write-Host "              ⚠️  $m" -ForegroundColor $ColorWarning; $script:installLog += "              ⚠️  $m" }
-function Write-Info { param([string]$m); Write-Host "              ℹ️  $m" -ForegroundColor $ColorInfo }
+function Write-Step { param([string]$m); $t = Get-Date -Format "HH:mm:ss"; Write-Host "  [$t] ▶ $m" -ForegroundColor $ColorStep; Write-AppendLog "[$t] ▶ $m" }
+function Write-OK   { param([string]$m, [switch]$NoCount); Write-Host "              ✅ $m" -ForegroundColor $ColorSuccess; Write-AppendLog "              ✅ $m"; if (-not $NoCount) { $script:completedSteps++ } }
+function Write-Fail { param([string]$m); Write-Host "              ❌ $m" -ForegroundColor $ColorError;   Write-AppendLog "              ❌ $m" }
+function Write-Warn { param([string]$m); Write-Host "              ⚠️  $m" -ForegroundColor $ColorWarning; Write-AppendLog "              ⚠️  $m" }
+function Write-Info { param([string]$m); Write-Host "              ℹ️  $m" -ForegroundColor $ColorInfo; Write-AppendLog "              ℹ️  $m" }
 
 function Test-CommandExists {
     param([string]$Command)
@@ -59,7 +71,7 @@ function Test-CommandExists {
 # 获取已安装工具的版本号 (安全: 使用脚本块替代 Invoke-Expression)
 function Get-InstalledVersion {
     param([scriptblock]$VersionCommand)
-    try { $o = & $VersionCommand 2>&1 | Select-Object -First 1; return "$o".Trim() } catch { return "未知" }
+    try { $o = & $VersionCommand 2>&1 | Select-Object -First 1; $v = "$o".Trim(); if ([string]::IsNullOrWhiteSpace($v)) { return "未知" } else { return $v } } catch { return "未知" }
 }
 
 # 版本比对提示：已有工具 → 展示当前版本 → 询问是否重新安装
@@ -69,8 +81,9 @@ function Request-Confirmation {
     Write-Warn "$ToolName 已安装 (当前版本: $InstalledVersion)"
     Write-Info "脚本将安装版本: $TargetVersionDesc"
     Write-Host "  ❓ 是否重新安装/升级? (Y=升级覆盖, N=跳过保留当前): " -NoNewline -ForegroundColor $ColorPrompt
-    if ((Read-Host) -match '^[Yy]$') { Write-Info "将重新安装/升级 $ToolName ..."; return $true }
-    Write-Warn "已跳过 $ToolName (保留当前版本: $InstalledVersion)"; return $false
+    $userInput = Read-Host
+    if ($userInput -match '^[Yy]$') { Write-Info "将重新安装/升级 $ToolName ..."; Write-AppendLog "  ❓ 用户选择: 重新安装/升级 $ToolName"; return $true }
+    Write-Warn "已跳过 $ToolName (保留当前版本: $InstalledVersion)"; Write-AppendLog "  ❓ 用户选择: 跳过 $ToolName"; return $false
 }
 
 # winget 安装 (--disable-interactivity 禁用 spinner 干扰输出)
@@ -85,6 +98,49 @@ function Invoke-WingetInstall {
         Write-Fail "$DisplayName 安装失败: 无法连接到互联网"; return $false
     }
     Write-Fail "$DisplayName 安装失败"; Write-Info "详情: $r"; return $false
+}
+
+# 检测 MySQL（即使不在 PATH 中也能探测）
+function Test-MySqlExists {
+    # 1. 先试 Get-Command（PATH 内）
+    if (Test-CommandExists "mysql") { return $true }
+    # 2. 探测常见安装路径
+    $base = "C:\Program Files\MySQL"
+    if (Test-Path $base) {
+        foreach ($d in Get-ChildItem $base -Directory -Filter "MySQL Server *" -ErrorAction SilentlyContinue) {
+            $bin = Join-Path $d.FullName "bin\mysql.exe"
+            if (Test-Path $bin) { return $true }
+        }
+    }
+    # 3. 探测 Program Files (x86)
+    $base86 = "${env:ProgramFiles(x86)}\MySQL"
+    if (Test-Path $base86) {
+        foreach ($d in Get-ChildItem $base86 -Directory -Filter "MySQL Server *" -ErrorAction SilentlyContinue) {
+            $bin = Join-Path $d.FullName "bin\mysql.exe"
+            if (Test-Path $bin) { return $true }
+        }
+    }
+    return $false
+}
+
+# 获取 MySQL 安装路径 bin 目录（不在 PATH 时回退）
+function Get-MySqlBin {
+    if (Test-CommandExists "mysql") { return "" }
+    $base = "C:\Program Files\MySQL"
+    if (Test-Path $base) {
+        foreach ($d in Get-ChildItem $base -Directory -Filter "MySQL Server *" -ErrorAction SilentlyContinue) {
+            $bin = Join-Path $d.FullName "bin"
+            if (Test-Path (Join-Path $bin "mysql.exe")) { return $bin }
+        }
+    }
+    $base86 = "${env:ProgramFiles(x86)}\MySQL"
+    if (Test-Path $base86) {
+        foreach ($d in Get-ChildItem $base86 -Directory -Filter "MySQL Server *" -ErrorAction SilentlyContinue) {
+            $bin = Join-Path $d.FullName "bin"
+            if (Test-Path (Join-Path $bin "mysql.exe")) { return $bin }
+        }
+    }
+    return ""
 }
 
 # 检测 MSVC
@@ -107,6 +163,7 @@ function Test-MsvcExists {
 
 # 刷新 PATH
 function Update-Path {
+    Write-AppendLog "  🔄 刷新 PATH 环境变量"
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
@@ -115,6 +172,7 @@ function Update-Path {
 function Invoke-Installer {
     param([string]$ToolName, [string]$ExeName, [string]$PackageId, [string]$DisplayName, [string]$TargetDesc, [scriptblock]$VersionCmd, [string]$VerReplace)
     Write-Host "`n  ── $ToolName ──────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── $($ToolName -replace '^\S+\s*', '') ──"
     if (Test-CommandExists $ExeName) {
         $ver = Get-InstalledVersion -VersionCommand $VersionCmd
         if ($VerReplace) { $ver = $ver -replace $VerReplace, '' }
@@ -140,13 +198,17 @@ function Install-Winget {
     try {
         Write-Info "正在获取最新 winget 版本信息..."
         $releaseApi = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
-        $releaseInfo = Invoke-RestMethod -Uri $releaseApi -ErrorAction Stop
+        $releaseInfo = Invoke-RestMethod -Uri $releaseApi -TimeoutSec 15 -ErrorAction Stop
         $asset = $releaseInfo.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
         
         if ($asset) {
             Write-Info "下载: $($asset.name) ($([math]::Round($asset.size/1MB, 1)) MB)"
             $installerPath = Join-Path $tempDir $asset.name
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -ErrorAction Stop
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -TimeoutSec 120 -ErrorAction Stop
+            # 完整性校验: 文件存在且大小 > 1MB
+            if ((-not (Test-Path $installerPath)) -or ((Get-Item $installerPath).Length -lt 1MB)) {
+                throw "下载文件不完整或为空"
+            }
             Write-OK "下载完成" -NoCount
             
             Write-Step "正在安装 winget ..."
@@ -176,15 +238,17 @@ function Install-Winget {
     }
     
     Write-Host "`n  ⚠️  请手动安装 winget 后重新运行本脚本。" -ForegroundColor $ColorWarning
-    Write-Host "  按任意键退出..." -ForegroundColor Gray
-    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
-    exit 1
+    return $false
 }
 
 # 主流程启动前检查 winget 是否可用
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Install-Winget
+    if (-not (Install-Winget)) {
+        Write-Host "`n  按任意键退出..." -ForegroundColor Gray
+        $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        exit 1
+    }
 }
 
 # ========================== 安装模块 ==========================
@@ -208,8 +272,8 @@ function Install-Java {
     # 设置 JAVA_HOME
     try {
         if (-not ${env:JAVA_HOME}) {
-            foreach ($p in "C:\Program Files\Eclipse Adoptium\jdk-21.0.0.35-hotspot\", "C:\Program Files\Eclipse Adoptium\jdk-21*\") {
-                $f = Get-Item $p -ErrorAction SilentlyContinue | Select-Object -First 1
+            foreach ($p in "C:\Program Files\Eclipse Adoptium\jdk-21*\") {
+                $f = Get-Item $p -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
                 if ($f) { [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $f.FullName, "Machine"); Write-OK "JAVA_HOME 已设置为: $($f.FullName)" -NoCount; break }
             }
         }
@@ -219,6 +283,7 @@ function Install-Java {
 
 function Install-CPP {
     Write-Host "`n  ── ⚙️  C/C++ 开发工具 ──────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── C/C++ 开发工具 ──"
     $compilerDesc = [System.Collections.ArrayList]@()
     if (Test-CommandExists "gcc")   { $null = $compilerDesc.Add("GCC $(Get-InstalledVersion { gcc --version })") }
     if (Test-CommandExists "g++")   { $null = $compilerDesc.Add("G++ $(Get-InstalledVersion { g++ --version })") }
@@ -230,22 +295,47 @@ function Install-CPP {
     $somethingInstalled = $false
     
     if ($compilerFound) {
-        $doCompilerInstall = Request-Confirmation -ToolName "C/C++ 编译器" -InstalledVersion ($compilerDesc -join "; ") `
-            -TargetVersionDesc "MinGW-w64 (GCC/G++)"
+        $cd = $compilerDesc -join "; "
+        $doCompilerInstall = Request-Confirmation -ToolName "C/C++ 编译器" -InstalledVersion $cd -TargetVersionDesc "MinGW-w64 (GCC/G++)"
         if (-not $doCompilerInstall) { $script:completedSteps++ }
     }
     
     if ($doCompilerInstall) {
         Write-Step $(if ($compilerFound) { "正在安装/升级 MinGW-w64 (GCC/G++) ..." } else { "未检测到 C/C++ 编译器，正在安装 MinGW-w64 (GCC/G++) ..." })
         $mingwInstalled = $false
-        foreach ($e in @(@{Id="WinLibs.GCC"; Name="WinLibs GCC"}, @{Id="MSYS2.MSYS2"; Name="MSYS2 (含 MinGW-w64)"})) {
+        foreach ($e in @(@{Id="niXman.mingw-w64"; Name="MinGW-w64 (独立版)"}, @{Id="MSYS2.MSYS2"; Name="MSYS2 (含 MinGW-w64)"})) {
             $mingwInstalled = Invoke-WingetInstall -PackageId $e.Id -DisplayName $e.Name
             if ($mingwInstalled) {
-                if ($e.Id -eq "MSYS2.MSYS2" -and (Test-Path "C:\msys64\mingw64\bin")) {
-                    $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-                    if ($curPath -notmatch [regex]::Escape("C:\msys64\mingw64\bin")) {
-                        [System.Environment]::SetEnvironmentVariable("Path", "$curPath;C:\msys64\mingw64\bin", "Machine")
-                        Write-OK "已追加 MSYS2 MinGW 路径到系统 PATH" -NoCount
+                if ($e.Id -eq "MSYS2.MSYS2") {
+                    Write-Step "正在通过 pacman 安装 MinGW-w64 编译器 (GCC/G++) ..."
+                    $pacman = "C:\msys64\usr\bin\pacman.exe"
+                    if (Test-Path $pacman) {
+                        try {
+                            & $pacman -S --noconfirm --needed mingw-w64-ucrt64-gcc 2>&1 | Out-Null
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-OK "MinGW-w64 GCC 安装成功 (UCRT64)" -NoCount
+                                $mingwPaths = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")
+                            } else {
+                                Write-Warn "pacman 安装 GCC 返回非零，尝试 mingw64 环境..."
+                                & $pacman -S --noconfirm --needed mingw-w64-x86_64-gcc 2>&1 | Out-Null
+                                $mingwPaths = @("C:\msys64\mingw64\bin")
+                            }
+                        } catch {
+                            Write-Warn "pacman 调用失败: $_"
+                            $mingwPaths = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")
+                        }
+                    } else {
+                        Write-Warn "pacman 未找到，请手动运行 MSYS2 并安装 mingw-w64-gcc"
+                        $mingwPaths = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")
+                    }
+                    foreach ($mp in $mingwPaths) {
+                        if (Test-Path (Join-Path $mp "gcc.exe")) {
+                            $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+                            if ($curPath -notmatch [regex]::Escape($mp)) {
+                                [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$mp", "Machine")
+                                Write-OK "已追加 $mp 到系统 PATH" -NoCount
+                            }
+                        }
                     }
                 }
                 Update-Path; $somethingInstalled = $true; break
@@ -257,7 +347,7 @@ function Install-CPP {
     # CMake
     if (Test-CommandExists "cmake") {
         $doCmake = Request-Confirmation -ToolName "CMake" -InstalledVersion (Get-InstalledVersion { cmake --version }) -TargetVersionDesc "CMake (winget 最新版)"
-        if ($doCmake) { Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"; Update-Path; $somethingInstalled = $true }
+        if ($doCmake) { if (Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake") { Update-Path; $somethingInstalled = $true } }
         else { $script:completedSteps++ }
     } else {
         Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"; Update-Path; $somethingInstalled = $true
@@ -289,23 +379,37 @@ function Install-VSCode {
 
 function Install-Maven {
     Write-Host "`n  ── 🏗️  Maven ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── Maven ──"
     if (Test-CommandExists "mvn") {
         $ver = Get-InstalledVersion { mvn --version 2>&1 }
         if (-not (Request-Confirmation -ToolName "Maven" -InstalledVersion $ver -TargetDesc "Apache Maven 3.x (winget 最新版)")) {
             $script:completedSteps++; return $false
         }
     }
-    $r = Invoke-WingetInstall -PackageId "Apache.Maven.3" -DisplayName "Apache Maven 3"
-    Update-Path
+    $r = Invoke-WingetInstall -PackageId "Apache.Maven" -DisplayName "Apache Maven"
+    if ($r) { Update-Path }
     # 设置 MAVEN_HOME
     try {
+        $mavenHomeFound = $false
         $mavenPaths = @("C:\Program Files\Apache\Maven\", "C:\Program Files (x86)\Apache\Maven\")
         foreach ($base in $mavenPaths) {
             $found = Get-ChildItem $base -Directory -Filter "apache-maven-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
             if ($found) {
                 [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $found.FullName, "Machine")
                 Write-OK "MAVEN_HOME 已设置为: $($found.FullName)" -NoCount
-                break
+                $mavenHomeFound = $true; break
+            }
+        }
+        # 回退: 从 mvn 命令路径推导 MAVEN_HOME
+        if (-not $mavenHomeFound) {
+            $mvnCmdPath = (Get-Command mvn -ErrorAction SilentlyContinue).Source
+            if ($mvnCmdPath) {
+                $mvnBinDir = Split-Path -Parent $mvnCmdPath
+                $mvnHome = Split-Path -Parent $mvnBinDir
+                if ($mvnHome -and (Test-Path $mvnHome)) {
+                    [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $mvnHome, "Machine")
+                    Write-OK "MAVEN_HOME 已从 mvn 路径推导: $mvnHome" -NoCount
+                }
             }
         }
     } catch { Write-Warn "MAVEN_HOME 设置失败，请手动配置" }
@@ -314,14 +418,18 @@ function Install-Maven {
 
 function Install-MySQL {
     Write-Host "`n  ── 🗄️  MySQL ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
-    if (Test-CommandExists "mysql") {
-        $ver = Get-InstalledVersion { mysql --version }
+    Write-AppendLog "`n  ── MySQL ──"
+    if (Test-MySqlExists) {
+        $mysqlBin = Get-MySqlBin
+        $mysqlCmd = if ($mysqlBin) { Join-Path $mysqlBin "mysql.exe" } else { "mysql" }
+        $ver = Get-InstalledVersion { & $mysqlCmd --version 2>&1 }
+        if ($ver -match 'Ver (\S+)') { $ver = "Ver $($matches[1])" }
         if (-not (Request-Confirmation -ToolName "MySQL" -InstalledVersion $ver -TargetDesc "MySQL Community Server (winget 最新版)")) {
             $script:completedSteps++; return $false
         }
     }
     $r = Invoke-WingetInstall -PackageId "Oracle.MySQL" -DisplayName "MySQL Community Server"
-    Update-Path
+    if ($r) { Update-Path }
     if ($r) {
         Write-Info "MySQL 安装完成。首次使用请执行初始化:"
         Write-Info "  1. 打开 MySQL Installer 或命令行"
@@ -335,14 +443,37 @@ function Install-All {
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
     Write-Host "  ║         🚀  开 始 一 键 安 装 所 有 工 具                  ║" -ForegroundColor "Red"
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor "Red"
-    $script:totalSteps = 9; $script:completedSteps = 0
+    Write-AppendLog "`n  ╔══════════════════════════════════════════════╗"
+    Write-AppendLog "  ║           一键安装所有工具开始               ║"
+    Write-AppendLog "  ╚══════════════════════════════════════════════╝"
+    $script:completedSteps = 0
     $startTime = Get-Date
-    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode; Install-Maven; Install-MySQL
+    $funcs = @(
+        @{Name="Git";     F={ Install-Git }},
+        @{Name="Python";  F={ Install-Python }},
+        @{Name="Java";    F={ Install-Java }},
+        @{Name="C/C++";   F={ Install-CPP }},
+        @{Name="Node.js"; F={ Install-NodeJS }},
+        @{Name="Docker";  F={ Install-Docker }},
+        @{Name="VS Code"; F={ Install-VSCode }},
+        @{Name="Maven";   F={ Install-Maven }},
+        @{Name="MySQL";   F={ Install-MySQL }}
+    )
+    foreach ($fn in $funcs) {
+        try {
+            & $fn.F
+        } catch {
+            Write-Fail "安装 $($fn.Name) 时发生意外错误: $_"
+        }
+    }
     $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
-    Write-Host "  ║        $(if ($script:completedSteps -ge $script:totalSteps) { '✅  所有工具已就绪，无需额外安装!' } else { '🎉  安装流程完成!' })                              ║" -ForegroundColor $ColorSuccess
-    Write-Host "  ║              就绪: $script:completedSteps / 耗时: ${dur}分钟                          ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║                        🎉  安装流程完成!                                ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║              已处理 $script:completedSteps/9 项 / 耗时: ${dur}分钟                    ║" -ForegroundColor $ColorSuccess
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $ColorSuccess
+    Write-AppendLog "  ╔══════════════════════════════════════════════╗"
+    Write-AppendLog "  ║        安装流程完成! 已处理 $script:completedSteps/9 项 / 耗时: ${dur}分钟         ║"
+    Write-AppendLog "  ╚══════════════════════════════════════════════╝"
     Show-Summary
     Invoke-Reboot
 }
@@ -350,6 +481,7 @@ function Install-All {
 # ========================== 显示摘要 ==========================
 function Show-Summary {
     Write-Host "`n  ── 📋 当前环境检测结果 ──────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 📋 当前环境检测结果 ──"
     Update-Path
     $tools = @(
         @{L="Git";      C={ git --version }},
@@ -363,49 +495,71 @@ function Show-Summary {
         @{L="Node.js";  C={ node --version }},
         @{L="npm";      C={ npm --version }},
         @{L="Docker";   C={ docker --version }},
-        @{L="MySQL";    C={ mysql --version }},
+        @{L="MySQL";    C={
+                $mb = Get-MySqlBin
+                $raw = if ($mb) { & (Join-Path $mb "mysql.exe") --version 2>&1 } else { mysql --version 2>&1 }
+                if ($raw -match 'Ver (\S+)') { "Ver $($matches[1])" } else { $raw }
+            }},
         @{L="CMake";    C={ cmake --version }},
         @{L="VS Code";  C={ code --version }}
     )
     foreach ($t in $tools) {
-        try { $v = & $t.C 2>&1 | Select-Object -First 1; Write-Host "  ✅ $($t.L.PadRight(10)) : $v" -ForegroundColor $ColorSuccess }
-        catch { Write-Host "  ❌ $($t.L.PadRight(10)) : 未安装" -ForegroundColor $ColorError }
+        try { $v = & $t.C 2>&1 | Select-Object -First 1; Write-Host "  ✅ $($t.L.PadRight(10)) : $v" -ForegroundColor $ColorSuccess; Write-AppendLog "  ✅ $($t.L.PadRight(10)) : $v" }
+        catch [System.Management.Automation.CommandNotFoundException] { Write-Host "  ❌ $($t.L.PadRight(10)) : 未安装" -ForegroundColor $ColorError; Write-AppendLog "  ❌ $($t.L.PadRight(10)) : 未安装" }
+        catch { Write-Host "  ⚠️  $($t.L.PadRight(10)) : 检测异常 ($($_.Exception.Message))" -ForegroundColor $ColorWarning; Write-AppendLog "  ⚠️  $($t.L.PadRight(10)) : 检测异常 ($($_.Exception.Message))" }
     }
 }
 
 function Invoke-Reboot {
     Write-Host "`n  ⚠️  部分工具 (如 Docker) 安装后需要重启系统才能完全生效。" -ForegroundColor $ColorWarning
     Write-Host "  是否立即重启? (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
-    if ((Read-Host) -match '^[Yy]$') {
+    $rebootInput = Read-Host
+    if ($rebootInput -match '^[Yy]$') {
+        Write-AppendLog "  🔄 用户选择立即重启系统"
         Write-Host "  ⚠️  即将重启系统，请先保存所有未保存的工作!" -ForegroundColor $ColorWarning
         Write-Host "  按任意键确认重启 (或 Ctrl+C 取消)..." -ForegroundColor $ColorWarning
         $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         Restart-Computer
     }
+    Write-AppendLog "  🔄 用户跳过重启"
+}
+
+# 清理旧日志，仅保留最近 10 个
+function Clear-OldLogs {
+    param([string]$LogDir)
+    $pattern = "install_log_*.txt"
+    $oldLogs = @(Get-ChildItem -Path $LogDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -Skip 10)
+    if ($oldLogs) {
+        $oldLogs | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Info "已清理 $(@($oldLogs).Count) 个旧日志文件"
+    }
 }
 
 function Save-Log {
-    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-    $path = Join-Path $dir "install_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-    $script:installLog | Out-File -FilePath $path -Encoding UTF8
-    Write-Host "`n  📄 安装日志已保存到: $path" -ForegroundColor $ColorInfo
+    Clear-OldLogs -LogDir $script:logDir
+    Write-Host "`n  📄 实时日志已保存到: $script:logFilePath" -ForegroundColor $ColorInfo
 }
 
 # 等待按键
-function Pause-Key { Write-Host "`n  按任意键返回主菜单..." -ForegroundColor $ColorInfo; $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") }
+function Wait-Key {
+    Write-Host "`n  按任意键返回主菜单..." -ForegroundColor $ColorInfo
+    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
 
 # ========================== 主菜单 ==========================
 $menu = [ordered]@{
-    '1'  = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
+    '1'  = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All }}
     '2'  = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
     '3'  = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
     '4'  = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
-    '5'  = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
+    '5'  = @{Label="⚙️ 仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
     '6'  = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
     '7'  = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
     '8'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
-    '9'  = @{Label="🏗️  仅安装 Maven"; Action={ $null = Install-Maven }}
-    '10' = @{Label="🗄️  仅安装 MySQL"; Action={ $null = Install-MySQL }}
+    '9'  = @{Label="🏗️ 仅安装 Maven"; Action={ $null = Install-Maven }}
+    '10' = @{Label="🗄️ 仅安装 MySQL"; Action={ $null = Install-MySQL }}
     '11' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
 }
 
@@ -414,25 +568,35 @@ function Show-Menu {
     Write-Host "  请选择要执行的操作:" -ForegroundColor $ColorInfo
     Write-Host ""
     foreach ($k in $menu.Keys) { Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu }) }
-    Write-Host "    [0]  ❌ 退出" -ForegroundColor $ColorMenu
+    Write-Host "    [0]  👋 退出" -ForegroundColor $ColorMenu
     Write-Host "`n  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
-    Write-Host "  请输入选项 [0-$($menu.Keys.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
+Write-Host "  请输入选项 [0-$($menu.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
 }
 
 # ========================== 主循环 ==========================
 do {
     Show-Menu
     $choice = Read-Host
+    # 调试: trim 输入 + 输出实际读取值
+    $choice = $choice.Trim()
     Clear-Host
     Write-Title
     
-    if ($choice -eq '0') { Write-Host "`n  👋 再见! 祝你编码愉快~" -ForegroundColor $ColorTitle; exit }
-    elseif ($menu.ContainsKey($choice)) {
+    if ($choice -eq '0') {
+        Write-Host "`n  👋 再见! 祝你编码愉快~" -ForegroundColor $ColorTitle
+        Write-AppendLog "  👋 用户退出脚本"
+        exit
+    }
+    elseif ($menu.Contains($choice)) {
+        Write-AppendLog "  📌 用户选择: [$choice]"
         & $menu[$choice].Action
-        Pause-Key
+        # 选项 11 (Show-Summary) 不产生安装日志，跳过保存
+        if ($choice -ne '11') { Save-Log }
+        Wait-Key
     }
     else {
         Write-Host "`n  ❌ 无效选项，请重新选择。" -ForegroundColor $ColorError
+        Write-AppendLog "  ❌ 无效选项: $choice"
         Start-Sleep -Seconds 1
     }
 } while ($true)

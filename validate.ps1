@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $scriptPath = Join-Path $PSScriptRoot "setup_dev_env.ps1"
 
 Write-Host "`n  ═══════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "    setup_dev_env.ps1 代码审查 (精简版 v1.2)" -ForegroundColor Cyan
+Write-Host "    setup_dev_env.ps1 代码审查 (精简版 v1.3)" -ForegroundColor Cyan
 Write-Host "  ═══════════════════════════════════════════`n" -ForegroundColor Cyan
 
 # === 1. 语法检查 ===
@@ -30,7 +30,7 @@ $structuralChecks = @(
         $content -match "function Install-All" -and 
         $content -match "function Show-Menu")},
     @{Name="主循环 do..while"; Pass=($content -match 'do \{' -and $content -match '\} while \(\$true\)')},
-    @{Name="菜单字典 \$menu"; Pass=($content -match '\$menu\s*=\s*\[ordered\]@\{' -and $content -match "menu\.ContainsKey")},
+    @{Name="菜单字典 `$menu"; Pass=($content -match '\$menu\s*=\s*\[ordered\]@\{' -and $content -match "menu\.Contains")},
     @{Name="通用安装包装器 Invoke-Installer"; Pass=($content -match "function Invoke-Installer")},
     @{Name="winget 自动安装 Install-Winget"; Pass=($content -match "function Install-Winget" -and $content -match "Add-AppxPackage")}
 )
@@ -52,14 +52,14 @@ $patternChecks = @(
     @{Name="Invoke-Installer 通用包装器"; Pass=($content -match "function Invoke-Installer")},
     @{Name="winget --disable-interactivity"; Pass=($content -match '--disable-interactivity')},
     @{Name="winget 网络错误检测"; Pass=($content -match '0x80072efd|0x80072ee7|0x80072f8f')},
-    @{Name="Pause-Key 消除重复代码"; Pass=($content -match "function Pause-Key")},
+    @{Name="Wait-Key 统一等待按键"; Pass=($content -match "function Wait-Key")},
     @{Name="UTF8 编码设置"; Pass=($content -match 'OutputEncoding.*UTF8')},
     @{Name="管理员权限检查"; Pass=($content -match 'WindowsPrincipal')},
     @{Name="winget 可用性检查"; Pass=($content -match 'Get-Command winget')},
     @{Name="JAVA_HOME 设置"; Pass=($content -match 'JAVA_HOME')},
     @{Name="MAVEN_HOME 设置"; Pass=($content -match 'MAVEN_HOME')},
     @{Name="安装日志保存"; Pass=($content -match 'Save-Log|install_log_')},
-    @{Name="WinLibs 优先 MSYS2"; Pass=($content -match "WinLibs.GCC") -and ($content.IndexOf("WinLibs.GCC") -lt $content.IndexOf("MSYS2.MSYS2"))},
+    @{Name="niXman.mingw-w64 优先 MSYS2"; Pass=($content -match "niXman.mingw-w64") -and ($content.IndexOf("niXman.mingw-w64") -lt $content.IndexOf("MSYS2.MSYS2"))},
     @{Name="MSYS2 PATH 手动追加"; Pass=($content -match "msys64\\\\mingw64\\\\bin" -or $content -match 'msys64\\mingw64\\bin')},
     @{Name="编译器独立检测 ArrayList"; Pass=($content -match "ArrayList")}
 )
@@ -103,14 +103,14 @@ $tools = @(
     @{Name="pip";      Install="";                              Summary="pip --version"},
     @{Name="Java JDK"; Install="EclipseAdoptium.Temurin.21.JDK"; Summary="java -version"},
     @{Name="javac";    Install="";                              Summary="javac --version"},
-    @{Name="GCC";      Install="WinLibs.GCC";                   Summary="gcc --version"},
-    @{Name="G++";      Install="WinLibs.GCC";                   Summary="g++ --version"},
+    @{Name="GCC";      Install="niXman.mingw-w64";              Summary="gcc --version"},
+    @{Name="G++";      Install="niXman.mingw-w64";              Summary="g++ --version"},
     @{Name="Node.js";  Install="OpenJS.NodeJS.LTS";             Summary="node --version"},
     @{Name="npm";      Install="";                              Summary="npm --version"},
     @{Name="Docker";   Install="Docker.DockerDesktop";          Summary="docker --version"},
     @{Name="CMake";    Install="Kitware.CMake";                 Summary="cmake --version"},
     @{Name="VS Code";  Install="Microsoft.VisualStudioCode";    Summary="code --version"},
-    @{Name="Maven";    Install="Apache.Maven.3";                Summary="mvn --version"},
+    @{Name="Maven";    Install="Apache.Maven";                  Summary="mvn --version"},
     @{Name="MySQL";    Install="Oracle.MySQL";                  Summary="mysql --version"}
 )
 
@@ -131,7 +131,7 @@ foreach ($t in $tools) {
 Write-Host "`n  ── 冗余检测 ────────────────────────────────────────────" -ForegroundColor Cyan
 $redundancyPatterns = @(
     @{Name="无重复 switch 分支";        Pass=($content -match '\$menu\[')},
-    @{Name="无重复 '按任意键返回' 代码"; Pass=(($content -match "function Pause-Key") -and (([regex]::Matches($content, "按任意键返回").Count) -le 2))},
+    @{Name="无重复 '按 Enter 返回' 代码"; Pass=(($content -match "function Wait-Key") -and (([regex]::Matches($content, "按 Enter 返回主菜单").Count) -le 1))},
     @{Name="Show-Summary 循环驱动";     Pass=($content -match 'foreach \(\$t in \$tools\)' -and $content -match '& \$t\.C')},
     @{Name="Update-Path 集中管理";      Pass=($content -match "function Invoke-Installer" -and $content -match "Update-Path")},
     @{Name="Invoke-Installer 统一入口";  Pass=([regex]::Matches($content, "Invoke-Installer ").Count -ge 5)},
@@ -139,7 +139,7 @@ $redundancyPatterns = @(
     @{Name="菜单项数量 11+";            Pass=([regex]::Matches($content, "'\d+'\s*=\s*@\{Label=").Count -ge 11)},
     @{Name="无死代码 Test-InternetConnection"; Pass=($content -notmatch "Test-InternetConnection")},
     @{Name="winget GitHub API 自动下载"; Pass=($content -match "api.github.com/repos/microsoft/winget-cli" -and $content -match "msixbundle")},
-    @{Name="winget 缺失退出前自动清理"; Pass=($content -match 'Remove-Item.*-Recurse.*-Force.*\$tempDir' -and $content -match "exit 1")}
+    @{Name="winget 缺失退出前自动清理"; Pass=($content -match 'Remove-Item.*-Recurse.*-Force.*\$tempDir' -and $content -match 'Install-Winget.*return \$false' -and $content -match "exit 1")}
 )
 
 $allRedundantClean = $true
