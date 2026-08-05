@@ -1,7 +1,7 @@
 <#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.1
-  支持: Python / Java / C/C++ / Node.js / Git / Docker 等
+  🛠️  开发环境一键配置工具  v1.2
+  支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
 #>
@@ -13,14 +13,63 @@ if (-NOT ([System.Security.Principal.WindowsPrincipal] [System.Security.Principa
     if ((Read-Host) -notmatch '^[Yy]$') { exit }
 }
 
-# 检查 winget 是否可用 (必须)
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Write-Host "`n  ❌ 错误: 未检测到 winget 包管理器!" -ForegroundColor Red
-    Write-Host "  winget 是 Windows 10 1809+ 自带的包管理工具。" -ForegroundColor Yellow
-    Write-Host "  请确保您的 Windows 版本满足要求，或在 Microsoft Store 中安装 '应用安装程序'。" -ForegroundColor Yellow
-    Write-Host "`n  按任意键退出..." -ForegroundColor Gray
+# 自动安装 winget (如果缺失)
+function Install-Winget {
+    Write-Host "`n  ── ⚙️ 安装 winget 包管理器 ──────────────────────────────" -ForegroundColor $ColorMenu
+    Write-Step "未检测到 winget，正在自动下载安装..."
+    
+    $wingetUrl = "https://aka.ms/getwinget"
+    $tempDir = Join-Path $env:TEMP "winget_installer"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    
+    # 尝试从 GitHub Release 获取最新 winget
+    try {
+        Write-Info "正在获取最新 winget 版本信息..."
+        $releaseApi = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+        $releaseInfo = Invoke-RestMethod -Uri $releaseApi -ErrorAction Stop
+        $asset = $releaseInfo.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
+        
+        if ($asset) {
+            Write-Info "下载: $($asset.name) ($([math]::Round($asset.size/1MB, 1)) MB)"
+            $installerPath = Join-Path $tempDir $asset.name
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -ErrorAction Stop
+            Write-OK "下载完成" -NoCount
+            
+            Write-Step "正在安装 winget ..."
+            Add-AppxPackage -Path $installerPath -ErrorAction Stop
+            Write-OK "winget 安装成功!" -NoCount
+            
+            # 刷新 PATH 并验证
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + 
+                        [System.Environment]::GetEnvironmentVariable("Path", "User")
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                Write-OK "winget 已就绪" -NoCount
+                Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+    }
+    catch {
+        Write-Warn "GitHub 自动下载失败: $_"
+    }
+    
+    # 回退方案: 打开 winget 下载页面
+    Write-Warn "自动安装失败，将打开 winget 下载页面..."
+    Write-Host "  ❓ 是否打开 winget 下载页面? (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
+    if ((Read-Host) -match '^[Yy]$') {
+        Write-Info "正在打开下载页面..."
+        Start-Process $wingetUrl
+    }
+    
+    Write-Host "`n  ⚠️  请手动安装 winget 后重新运行本脚本。" -ForegroundColor $ColorWarning
+    Write-Host "  按任意键退出..." -ForegroundColor Gray
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
     exit 1
+}
+
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Install-Winget
 }
 
 # 控制台编码设置
@@ -48,8 +97,8 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.1           ║
-  ║     Python · Java · C/C++ · Node.js · Git · Docker · ...    ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.2           ║
+  ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
 "@
@@ -237,13 +286,57 @@ function Install-VSCode {
         -DisplayName "Visual Studio Code" -TargetDesc "VS Code (最新稳定版)" -VersionCmd { code --version }
 }
 
+function Install-Maven {
+    Write-Host "`n  ── 🏗️  Maven ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    if (Test-CommandExists "mvn") {
+        $ver = Get-InstalledVersion { mvn --version 2>&1 }
+        if (-not (Request-Confirmation -ToolName "Maven" -InstalledVersion $ver -TargetDesc "Apache Maven 3.x (winget 最新版)")) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId "Apache.Maven.3" -DisplayName "Apache Maven 3"
+    Update-Path
+    # 设置 MAVEN_HOME
+    try {
+        $mavenPaths = @("C:\Program Files\Apache\Maven\", "C:\Program Files (x86)\Apache\Maven\")
+        foreach ($base in $mavenPaths) {
+            $found = Get-ChildItem $base -Directory -Filter "apache-maven-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+            if ($found) {
+                [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $found.FullName, "Machine")
+                Write-OK "MAVEN_HOME 已设置为: $($found.FullName)" -NoCount
+                break
+            }
+        }
+    } catch { Write-Warn "MAVEN_HOME 设置失败，请手动配置" }
+    return $r
+}
+
+function Install-MySQL {
+    Write-Host "`n  ── 🗄️  MySQL ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
+    if (Test-CommandExists "mysql") {
+        $ver = Get-InstalledVersion { mysql --version }
+        if (-not (Request-Confirmation -ToolName "MySQL" -InstalledVersion $ver -TargetDesc "MySQL Community Server (winget 最新版)")) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId "Oracle.MySQL" -DisplayName "MySQL Community Server"
+    Update-Path
+    if ($r) {
+        Write-Info "MySQL 安装完成。首次使用请执行初始化:"
+        Write-Info "  1. 打开 MySQL Installer 或命令行"
+        Write-Info "  2. 运行: mysqld --initialize --console  (生成随机 root 密码)"
+        Write-Info "  3. 运行: mysql_secure_installation       (修改密码 + 安全加固)"
+    }
+    return $r
+}
+
 function Install-All {
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
     Write-Host "  ║         🚀  开 始 一 键 安 装 所 有 工 具                  ║" -ForegroundColor "Red"
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor "Red"
-    $script:totalSteps = 7; $script:completedSteps = 0
+    $script:totalSteps = 9; $script:completedSteps = 0
     $startTime = Get-Date
-    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode
+    Install-Git; Install-Python; Install-Java; Install-CPP; Install-NodeJS; Install-Docker; Install-VSCode; Install-Maven; Install-MySQL
     $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
     Write-Host "  ║        $(if ($script:completedSteps -ge $script:totalSteps) { '✅  所有工具已就绪，无需额外安装!' } else { '🎉  安装流程完成!' })                              ║" -ForegroundColor $ColorSuccess
@@ -263,11 +356,13 @@ function Show-Summary {
         @{L="pip";      C={ pip --version }},
         @{L="Java";     C={ java -version 2>&1 }},
         @{L="javac";    C={ javac --version }},
+        @{L="Maven";    C={ mvn --version 2>&1 }},
         @{L="GCC";      C={ gcc --version }},
         @{L="G++";      C={ g++ --version }},
         @{L="Node.js";  C={ node --version }},
         @{L="npm";      C={ npm --version }},
         @{L="Docker";   C={ docker --version }},
+        @{L="MySQL";    C={ mysql --version }},
         @{L="CMake";    C={ cmake --version }},
         @{L="VS Code";  C={ code --version }}
     )
@@ -300,15 +395,17 @@ function Pause-Key { Write-Host "`n  按任意键返回主菜单..." -Foreground
 
 # ========================== 主菜单 ==========================
 $menu = [ordered]@{
-    '1' = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
-    '2' = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
-    '3' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
-    '4' = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
-    '5' = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
-    '6' = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
-    '7' = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
-    '8' = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
-    '9' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+    '1'  = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All; Save-Log }}
+    '2'  = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
+    '3'  = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
+    '4'  = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
+    '5'  = @{Label="⚙️  仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
+    '6'  = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
+    '7'  = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
+    '8'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
+    '9'  = @{Label="🏗️  仅安装 Maven"; Action={ $null = Install-Maven }}
+    '10' = @{Label="🗄️  仅安装 MySQL"; Action={ $null = Install-MySQL }}
+    '11' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
 }
 
 function Show-Menu {
@@ -318,7 +415,7 @@ function Show-Menu {
     foreach ($k in $menu.Keys) { Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu }) }
     Write-Host "    [0]  ❌ 退出" -ForegroundColor $ColorMenu
     Write-Host "`n  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
-    Write-Host "  请输入选项 [0-9]: " -NoNewline -ForegroundColor $ColorPrompt
+    Write-Host "  请输入选项 [0-$($menu.Keys.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
 }
 
 # ========================== 主循环 ==========================
