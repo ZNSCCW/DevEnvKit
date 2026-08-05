@@ -1,0 +1,22 @@
+﻿========== 开发环境配置日志 [2026-06-18 10:27:52] ==========
+  📌 用户选择: [12]
+
+  ── 📋 当前环境检测结果 ──
+  🔄 刷新 PATH 环境变量
+  ✅ Git        : git version 2.54.0.windows.1
+  ✅ Python     : Python 3.11.9
+  ✅ pip        : pip 24.0 from C:\Users\32594\AppData\Local\Programs\Python\Python311\Lib\site-packages\pip (python 3.11)
+  ✅ Java       : java version "21.0.11" 2026-04-21 LTS
+  ✅ javac      : javac 21.0.11
+  ✅ Maven      : Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)
+  ❌ GCC        : 未安装
+  ❌ G++        : 未安装
+  ✅ Node.js    : v24.15.0
+  ✅ npm        : 11.12.1
+  ✅ Docker     : Docker version 29.5.2, build 79eb04c
+  ✅ MySQL      : Ver 8.4\bin\mysql.exe
+  ✅ CMake      : cmake version 4.3.3
+  ✅ VS Code    : 1.124.2
+  ✅ Android Studio : 已安装
+  ✅ Android SDK : API 36.1+ (C:\Users\32594\AppData\Local\Android\Sdk)
+  👋 用户退出脚本

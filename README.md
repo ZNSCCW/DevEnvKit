@@ -1,4 +1,4 @@
-# 🛠️ 开发环境一键配置工具 v1.3
+# 🛠️ 开发环境一键配置工具 v1.4
 
 适用于 **Windows 10/11** 的开发环境快速部署工具，通过 Windows 包管理器 (winget) 自动安装主流开发工具。
 
@@ -18,18 +18,19 @@
 | 容器 | **Docker Desktop** | `Docker.DockerDesktop` | 需要系统重启 |
 | 数据库 | **MySQL Community** | `Oracle.MySQL` | 支持非 PATH 检测 (Program Files 回退) |
 | 编辑器 | **Visual Studio Code** | `Microsoft.VisualStudioCode` | 最新稳定版 |
+| IDE | **Android Studio + SDK 34+** | `Google.AndroidStudio` | 国内镜像下载 SDK 组件 (platform-tools + build-tools 34 + platform 34) |
 
 ---
 
 ## 特性
 
 ### ✅ 核心功能
-- 🚀 **一键安装全部** — 菜单选项 `[1]`，9 个工具全自动部署
-- 🎯 **选择性安装** — 菜单选项 `[2]~[10]`，单独安装某个工具
+- 🚀 **一键安装全部** — 菜单选项 `[1]`，10 个工具全自动部署 (国内网络下 Android SDK 走腾讯云镜像)
+- 🎯 **选择性安装** — 菜单选项 `[2]~[11]`，单独安装某个工具
 - 🔄 **智能版本检测** — 已安装工具显示当前版本，Y=升级覆盖 / N=跳过保留
-- 📋 **环境摘要** — 菜单选项 `[11]`，检测 14 项组件安装状态
+- 📋 **环境摘要** — 菜单选项 `[12]`，检测 16 项组件安装状态
 
-### ✅ 安全设计 (v1.3 审计通过)
+### ✅ 安全设计 (v1.4 审计通过)
 - **零命令注入** — 全脚本使用 ScriptBlock `{}` + `&` 调用操作符，无 `Invoke-Expression`
 - **零参数注入** — 所有 `winget install --id` 的 PackageId 为硬编码常量，不接受外部输入
 - **零路径遍历** — 日志路径由 `Get-Date` 格式化生成，用户输入不参与路径拼接
@@ -37,7 +38,7 @@
 - **输入校验** — 所有 Read-Host 输入仅做布尔匹配 `-match '^[Yy]$'` 或精确 `menu.Contains()` 匹配
 - **死代码清理** — 移除未使用的 `Test-InternetConnection` 函数
 
-### ✅ 代码质量 (v1.3)
+### ✅ 代码质量 (v1.4)
 - **JAVA_HOME 通配检测** — 移除硬编码补丁版本号 `jdk-21.0.0.35-hotspot`，统一使用 `jdk-21*` 通配
 - **MAVEN_HOME 回退推导** — 若安装目录扫描失败，自动从 `Get-Command mvn` 的路径反推 `MAVEN_HOME`
 - **winget 下载完整性校验** — 验证下载文件存在且 > 1MB，防止损坏文件通过 `Add-AppxPackage` 安装
@@ -49,7 +50,7 @@
 - **`completedSteps` 语义注释** — 明确该变量计数"已就绪项"非"新安装数"
 - **退出菜单 emoji 修正** — `❌ 退出` → `👋 退出`
 
-### ✅ 代码精简 (v1.3)
+### ✅ 代码精简 (v1.4)
 - **switch 冗余消除** — 11 个重复分支改为 `$menu` 字典 + `Invoke-Installer` 统一入口
 - **按任意键重复消除** — 重复代码提取为 `Wait-Key` 函数 (1 行调用)
 - **Show-Summary 循环驱动** — 14 次重复检测改为 `foreach` 遍历 `$tools` 数组
@@ -63,6 +64,27 @@
 - 🔌 管理员权限智能检测 (可非管理员运行，但会给出警告)
 - 🌐 网络故障自动诊断 (区分 winget 源不可达 / 包未找到 / 安装失败)
 - ⚙️ **winget 自动安装** — 检测到缺失时自动从 GitHub Release 下载安装，失败则回退打开下载页
+
+---
+
+## 新增功能 (v1.4)
+
+### 🤖 Android Studio + SDK 34+
+- 通过 winget `Google.AndroidStudio` 安装 Android Studio
+- **国内网络适配**:
+  - SDK 组件直接从 `mirrors.cloud.tencent.com` 腾讯云镜像下载
+  - 无需 VPN / 梯子即可自动获取 platform-tools、build-tools 34.0.0、platform android-34
+  - 自动配置 `ANDROID_HOME` / `ANDROID_SDK_ROOT` 环境变量
+  - 自动追加 `platform-tools`（含 adb）到系统 PATH
+- 安装方式: 从 `repository2-1.xml` 实时解析最新组件版本号，按序下载
+- Android Studio 自动安装失败时提供 3 种手动方案（中国站 / 热点 / 其他电脑拷贝）
+
+### 🐛 Bug 修复 (v1.4)
+- **Install-CPP `completedSteps` 双倍计数修复**: 一键安装时 C/C++ 项只计 1 次
+- **b64.txt 编码同步修复**: 解决微信传输后文件编码损坏导致解析失败
+- **decode.ps1 UTF-8 BOM 修复**: 写出带 BOM 头，确保 PowerShell 5.1 正确识别
+- **`chcp` 命令缺失修复**: 批处理 stderr 屏蔽，`chcp` 不可用时不再显示错误
+- **编码损坏预防**: 启动前始终从 b64.txt 覆盖还原 .ps1 文件
 
 ---
 
@@ -104,7 +126,7 @@
 ```
 dev_env_setup/
 ├── 启动配置工具.bat        # 主启动器 (双击即可, 推荐)
-├── setup_dev_env.ps1      # PowerShell 主脚本 (~603 行)
+├── setup_dev_env.ps1      # PowerShell 主脚本 (~900 行)
 ├── validate.ps1           # 代码审查脚本 (35 项检查)
 ├── b64.txt                # 主脚本的 Base64 编码 (跨机传输用)
 ├── decode.ps1             # 解码器: 从 b64.txt 还原 setup_dev_env.ps1
@@ -134,7 +156,8 @@ dev_env_setup/
   [8]  📝 仅安装 VS Code
   [9]  🏗️ 仅安装 Maven
   [10] 🗄️ 仅安装 MySQL
-  [11] 📋 查看当前环境摘要
+  [11] 🤖 仅安装 Android Studio + SDK 34+
+  [12] 📋 查看当前环境摘要
   [0]  👋 退出
 ```
 
@@ -174,6 +197,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
   7. VS Code      → 检测版本 → 确认 → 安装
   8. Maven        → 检测版本 → 确认 → 安装 → 配置 MAVEN_HOME
   9. MySQL        → 检测版本 → 确认 → 安装 → 初始化指引
+  10. Android     → 检测版本 → 确认 → 安装 Android Studio → 腾讯云镜像下载 SDK 组件 → 配置 ANDROID_HOME + PATH
 ```
 
 每个步骤都会:
@@ -183,7 +207,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 4. 通过 `Invoke-Installer` 统一刷新 `PATH` (`Update-Path`)
 
 安装完成后:
-- 展示 **14 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code)
+- 展示 **16 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code/Android Studio/Android SDK)
 - 询问是否**立即重启** (Docker Desktop 需要重启生效，会先提示保存工作)
 
 ---
@@ -209,8 +233,29 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | **网络不可达** | `InternetOpenUrl() failed. 0x80072efd` | 机器无法访问外网，winget 无法下载 |
 | **包未找到** | `No package found matching input criteria` | winget 源中不存在该包 ID |
 | **编码损坏** | `Unexpected token` / `字符串缺少终止符` / 乱码 | `.ps1` 文件 UTF-8 编码被破坏 |
+| **Android 组件下载失败** | `远程服务器返回错误: (404)` | 镜像站命令字不匹配，脚本会自动从 XML 解析最新文件名 |
 
 > 遇到编码损坏: 删除 `setup_dev_env.ps1`，双击 `decode.ps1` 重新还原.
+
+---
+
+## Android SDK 国内镜像下载策略
+
+为解决国内网络环境无法访问 Google 服务器的问题，Android SDK 组件采用**直接从腾讯云镜像下载**的方式：
+
+```
+① 从 mirrors.cloud.tencent.com/AndroidSDK/repository2-1.xml 实时解析最新文件名
+         ↓
+② platform-tools_rXX-win.zip  → extract → %LOCALAPPDATA%\Android\Sdk\platform-tools\
+③ build-tools_r34-windows.zip → extract → %LOCALAPPDATA%\Android\Sdk\build-tools\34.0.0\
+④ platform-34-extXX_r01.zip   → extract → %LOCALAPPDATA%\Android\Sdk\platforms\android-34\
+         ↓
+⑤ ANDROID_HOME / ANDROID_SDK_ROOT / PATH 自动配置
+```
+
+此方案无需 cmdline-tools 和 sdkmanager，无需 VPN 或梯子。
+
+Android Studio 本身（Google 专有软件）无法通过镜像自动安装，脚本会打印清晰的手动指引。
 
 ---
 
@@ -229,11 +274,12 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 1. **Docker Desktop** 安装后需要**重启系统**才能完全生效
 2. **MySQL** 安装后需手动执行 `mysqld --initialize` 和 `mysql_secure_installation` 完成初始化
-3. 部分工具 (如 MinGW-w64、Maven) 安装后，在新终端中才会加载最新的 PATH
-4. 非管理员权限运行时，部分安装可能因 UAC 失败
-5. 安装日志默认保存在 `logs/` 子目录下 (`logs/install_log_YYYYMMDD_HHmmss.txt`)
-6. 如遇 winget 源问题，可先执行 `winget source update` 更新源
-7. 脚本启动时会自动检测 winget 是否可用，不可用时从 GitHub Release 自动下载安装
+3. **Android Studio** 在国内网络下可能无法自动下载，脚本会自动安装 SDK 组件并给出手动下载方案
+5. 部分工具 (如 MinGW-w64、Maven) 安装后，在新终端中才会加载最新的 PATH
+6. 非管理员权限运行时，部分安装可能因 UAC 失败
+7. 安装日志默认保存在 `logs/` 子目录下 (`logs/install_log_YYYYMMDD_HHmmss.txt`)
+8. 如遇 winget 源问题，可先执行 `winget source update` 更新源
+9. 脚本启动时会自动检测 winget 是否可用，不可用时从 GitHub Release 自动下载安装
 
 ---
 

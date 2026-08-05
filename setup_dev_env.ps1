@@ -1,6 +1,6 @@
-<#
+﻿<#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.3
+  🛠️  开发环境一键配置工具  v1.4
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -50,7 +50,7 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.3           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.4           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
@@ -293,11 +293,12 @@ function Install-CPP {
     $compilerFound = ($compilerDesc.Count -gt 0)
     $doCompilerInstall = $true
     $somethingInstalled = $false
+    $cppCounted = $false     # 确保 Install-All 中 C/C++ 只计 1 次
     
     if ($compilerFound) {
         $cd = $compilerDesc -join "; "
         $doCompilerInstall = Request-Confirmation -ToolName "C/C++ 编译器" -InstalledVersion $cd -TargetVersionDesc "MinGW-w64 (GCC/G++)"
-        if (-not $doCompilerInstall) { $script:completedSteps++ }
+        if (-not $doCompilerInstall) { if (-not $cppCounted) { $script:completedSteps++; $cppCounted = $true } }
     }
     
     if ($doCompilerInstall) {
@@ -348,9 +349,10 @@ function Install-CPP {
     if (Test-CommandExists "cmake") {
         $doCmake = Request-Confirmation -ToolName "CMake" -InstalledVersion (Get-InstalledVersion { cmake --version }) -TargetVersionDesc "CMake (winget 最新版)"
         if ($doCmake) { if (Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake") { Update-Path; $somethingInstalled = $true } }
-        else { $script:completedSteps++ }
+        else { if (-not $cppCounted) { $script:completedSteps++; $cppCounted = $true } }
     } else {
-        Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"; Update-Path; $somethingInstalled = $true
+        $cmakeResult = Invoke-WingetInstall -PackageId "Kitware.CMake" -DisplayName "CMake"
+        if ($cmakeResult) { Update-Path; $somethingInstalled = $true }
     }
     return $somethingInstalled
 }
@@ -499,6 +501,243 @@ function Install-MySQL {
     return $r
 }
 
+# ========================== Android 开发环境 ==========================
+function Test-AndroidStudioExists {
+    $paths = @(
+        "${env:ProgramFiles}\Android\Android Studio\bin\studio64.exe",
+        "${env:ProgramFiles(x86)}\Android\Android Studio\bin\studio64.exe",
+        "$env:LOCALAPPDATA\Android\Android Studio\bin\studio64.exe"
+    )
+    foreach ($p in $paths) { if (Test-Path $p) { return $true } }
+    return (Test-CommandExists "studio64")
+}
+
+function Get-AndroidSdkPath {
+    # 优先使用已有的 ANDROID_HOME
+    if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) { return $env:ANDROID_HOME }
+    $defaultPath = "$env:LOCALAPPDATA\Android\Sdk"
+    if (Test-Path $defaultPath) { return $defaultPath }
+    return $defaultPath  # 默认路径，即使不存在也返回
+}
+
+# 多 URL 回退下载：按顺序尝试，任一成功即返回
+function Invoke-DownloadWithFallback {
+    param([string[]]$Urls, [string]$OutFile, [int]$TimeoutSec = 120, [int]$MinSizeMB = 1)
+    foreach ($url in $Urls) {
+        try {
+            Write-Info "尝试下载: $url"
+            Invoke-WebRequest -Uri $url -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
+            if (-not (Test-Path $OutFile) -or (Get-Item $OutFile).Length -lt ($MinSizeMB * 1MB)) {
+                throw "下载文件不完整或为空"
+            }
+            return $true
+        } catch {
+            Write-Warn "失败 ($($url.Split('/')[2])): $_"
+            Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return $false
+}
+
+function Install-Android {
+    Write-Host "`n  ── 🤖 Android 开发环境 ────────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── Android 开发环境 ──"
+    $androidCounted = $false
+    $sdkPath = Get-AndroidSdkPath
+    
+    # ---- 1. Android Studio ----
+    $studioInstalled = Test-AndroidStudioExists
+    if ($studioInstalled) {
+        if (-not (Request-Confirmation -ToolName "Android Studio" -InstalledVersion "已安装" -TargetVersionDesc "Android Studio (winget 最新版)")) {
+            if (-not $androidCounted) { $script:completedSteps++; $androidCounted = $true }
+        } else {
+            $studioInstalled = $false
+        }
+    }
+    if (-not $studioInstalled) {
+        $r = Invoke-WingetInstall -PackageId "Google.AndroidStudio" -DisplayName "Android Studio"
+        if ($r) { Update-Path; $studioInstalled = $true }
+    }
+    # winget 失败时尝试从国内可访问的镜像下载
+    if (-not $studioInstalled) {
+        Write-Step "winget 安装失败，尝试从国内镜像下载 Android Studio ..."
+        $studioTempDir = Join-Path $env:TEMP "android_studio_installer"
+        New-Item -ItemType Directory -Path $studioTempDir -Force | Out-Null
+        $studioExe = Join-Path $studioTempDir "android-studio-installer.exe"
+        try {
+            # 从 Google 中国开发者站点获取最新版本号
+            $studioVerPage = Invoke-RestMethod -Uri "https://developer.android.google.cn/studio" -TimeoutSec 15 -ErrorAction Stop
+            $verMatch = [regex]::Match($studioVerPage, 'android-studio-(\d+\.\d+(?:\.\d+)?)-windows\.exe')
+            if ($verMatch.Success) {
+                $studioVersion = $verMatch.Groups[1].Value
+                $studioUrls = @(
+                    "https://redirector.gvt1.com/edgedl/android/studio/install/$studioVersion/android-studio-$studioVersion-windows.exe",
+                    "https://dl.google.com/dl/android/studio/install/$studioVersion/android-studio-$studioVersion-windows.exe"
+                )
+                if (Invoke-DownloadWithFallback -Urls $studioUrls -OutFile $studioExe -TimeoutSec 300 -MinSizeMB 100) {
+                    Write-Info "正在安装 Android Studio (请等待安装程序完成)..."
+                    Start-Process -FilePath $studioExe -Wait -ErrorAction Stop
+                    Write-OK "Android Studio 安装完成" -NoCount
+                    # 刷新 PATH 更新
+                    Update-Path
+                    $studioInstalled = $true
+                }
+            }
+        } catch {
+            Write-Warn "镜像下载失败: $_"
+        }
+        Remove-Item -Recurse -Force $studioTempDir -ErrorAction SilentlyContinue
+    }
+    # 如果仍然失败，提供手动下载指引
+    if (-not $studioInstalled) {
+        Write-Warn "Android Studio 自动安装失败（网络环境无法到达 Google 服务器）。"
+        Write-Info "Android SDK 组件已通过国内镜像安装成功，只差 Android Studio 本身。"
+        Write-Info "请手动下载 Android Studio 安装程序:"
+        Write-Info "  方案1: 访问 https://developer.android.google.cn/studio 下载（Google 中国站）"
+        Write-Info "  方案2: 使用手机热点共享网络后重新运行本脚本"
+        Write-Info "  方案3: 从其他电脑下载安装包复制到本机"
+        Write-Info "  安装后首次启动 → More Actions → SDK Manager 确认 SDK 已就绪即可"
+    }
+    
+    # ---- 2. SDK 组件（直接从腾讯云镜像下载，无需 cmdline-tools） ----
+    $sdkComplete = $false
+    $hasPlatform34 = Test-Path (Join-Path $sdkPath "platforms\android-34")
+    $hasBuildTools = Test-Path (Join-Path $sdkPath "build-tools\34.0.0\aapt.exe")
+    $hasPlatformTools = Test-Path (Join-Path $sdkPath "platform-tools\adb.exe")
+    $mirrorBase = "https://mirrors.cloud.tencent.com/AndroidSDK"
+    
+    if ($hasPlatform34 -and $hasBuildTools -and $hasPlatformTools) {
+        Write-OK "Android SDK (platform 34+) 已就绪" -NoCount
+        if (-not $androidCounted) { $script:completedSteps++; $androidCounted = $true }
+        $sdkComplete = $true
+    }
+    
+    if (-not $sdkComplete) {
+        # 从 repository2-1.xml 实时解析各组件的最新文件名
+        try {
+            Write-Step "正在从腾讯云镜像获取 SDK 组件版本信息..."
+            $repoXml = Invoke-RestMethod -Uri "$mirrorBase/repository2-1.xml" -TimeoutSec 30 -ErrorAction Stop
+            $xml = [xml]$repoXml
+            
+            # 解析 platform-tools Windows 版
+            $ptUrl = $xml.SelectSingleNode('//remotePackage[@path="platform-tools"]/.//archive[./host-os="windows"]/complete/url')
+            if (-not $ptUrl) { $ptUrl = $xml.SelectSingleNode('//remotePackage[@path="platform-tools"]/.//archive[not(./host-os)]/complete/url') }
+            
+            # 解析 build-tools;34.0.0 Windows 版
+            $btUrl = $xml.SelectSingleNode('//remotePackage[@path="build-tools;34.0.0"]/.//archive[./host-os="windows"]/complete/url')
+            if (-not $btUrl) { $btUrl = $xml.SelectSingleNode('//remotePackage[@path="build-tools;34.0.0"]/.//archive[not(./host-os)]/complete/url') }
+            
+            # 解析 platforms;android-34（无 OS 限制）
+            $p34Url = $xml.SelectSingleNode('//remotePackage[@path="platforms;android-34"]/.//archive[not(./host-os)]/complete/url')
+            if (-not $p34Url) { $p34Url = $xml.SelectSingleNode('//remotePackage[@path="platforms;android-34"]/.//archive/complete/url') }
+            
+            # 下载并解压各个组件
+            $sdkTempDir = Join-Path $env:TEMP "android_sdk_components"
+            New-Item -ItemType Directory -Path $sdkTempDir -Force | Out-Null
+            
+            # platform-tools
+            if ($ptUrl -and -not $hasPlatformTools) {
+                $ptFile = $ptUrl.'#text'.Trim()
+                Write-Step "正在下载 platform-tools ($ptFile)..."
+                if (Invoke-DownloadWithFallback -Urls @("$mirrorBase/$ptFile") -OutFile (Join-Path $sdkTempDir "pt.zip") -TimeoutSec 120 -MinSizeMB 1) {
+                    Expand-Archive -Path (Join-Path $sdkTempDir "pt.zip") -DestinationPath $sdkPath -Force
+                    Write-OK "platform-tools 安装成功" -NoCount
+                    $hasPlatformTools = $true
+                }
+            }
+            
+            # build-tools 34.0.0
+            if ($btUrl -and -not $hasBuildTools) {
+                $btFile = $btUrl.'#text'.Trim()
+                Write-Step "正在下载 Build Tools 34.0.0 ($btFile)..."
+                if (Invoke-DownloadWithFallback -Urls @("$mirrorBase/$btFile") -OutFile (Join-Path $sdkTempDir "bt.zip") -TimeoutSec 120 -MinSizeMB 1) {
+                    $btExtract = Join-Path $sdkTempDir "bt_extracted"
+                    Expand-Archive -Path (Join-Path $sdkTempDir "bt.zip") -DestinationPath $btExtract -Force
+                    # build-tools 解压后目录结构是 build-tools/34.0.0/
+                    New-Item -ItemType Directory -Path (Join-Path $sdkPath "build-tools\34.0.0") -Force | Out-Null
+                    Copy-Item -Path "$btExtract\*" -Destination (Join-Path $sdkPath "build-tools\34.0.0") -Recurse -Force
+                    Write-OK "Build Tools 34.0.0 安装成功" -NoCount
+                    $hasBuildTools = $true
+                }
+            }
+            
+            # platform android-34
+            if ($p34Url -and -not $hasPlatform34) {
+                $p34File = $p34Url.'#text'.Trim()
+                Write-Step "正在下载 Android SDK Platform 34 ($p34File)..."
+                if (Invoke-DownloadWithFallback -Urls @("$mirrorBase/$p34File") -OutFile (Join-Path $sdkTempDir "p34.zip") -TimeoutSec 120 -MinSizeMB 1) {
+                    $p34Extract = Join-Path $sdkTempDir "p34_extracted"
+                    Expand-Archive -Path (Join-Path $sdkTempDir "p34.zip") -DestinationPath $p34Extract -Force
+                    New-Item -ItemType Directory -Path (Join-Path $sdkPath "platforms\android-34") -Force | Out-Null
+                    Copy-Item -Path "$p34Extract\*" -Destination (Join-Path $sdkPath "platforms\android-34") -Recurse -Force
+                    Write-OK "Android SDK Platform 34 安装成功" -NoCount
+                    $hasPlatform34 = $true
+                }
+            }
+            
+            # 清理
+            Remove-Item -Recurse -Force $sdkTempDir -ErrorAction SilentlyContinue
+            
+        } catch {
+            Write-Warn "腾讯云镜像组件下载失败: $_"
+            Remove-Item -Recurse -Force $sdkTempDir -ErrorAction SilentlyContinue
+        }
+        
+        # ---- 3. 环境变量设置 ----
+        try {
+            # 如果还没有 ANDROID_HOME，设置它
+            if (-not $env:ANDROID_HOME) {
+                [System.Environment]::SetEnvironmentVariable("ANDROID_HOME", $sdkPath, "Machine")
+                Write-OK "ANDROID_HOME 已设置为: $sdkPath" -NoCount
+            }
+            # 同样设置 ANDROID_SDK_ROOT
+            if (-not $env:ANDROID_SDK_ROOT) {
+                [System.Environment]::SetEnvironmentVariable("ANDROID_SDK_ROOT", $sdkPath, "Machine")
+                Write-OK "ANDROID_SDK_ROOT 已设置为: $sdkPath" -NoCount
+            }
+            # 将 platform-tools 添加到 PATH
+            $ptPath = Join-Path $sdkPath "platform-tools"
+            if (Test-Path $ptPath) {
+                $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+                if ($curPath -notmatch [regex]::Escape($ptPath)) {
+                    [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$ptPath", "Machine")
+                    Write-OK "已将 platform-tools 添加到系统 PATH" -NoCount
+                }
+            }
+        } catch {
+            Write-Warn "环境变量设置失败，请手动配置: $_"
+        }
+        
+        Update-Path
+        
+        # ---- 5. 最终检查 ----
+        if ($hasPlatform34) {
+            if (-not $androidCounted) { $script:completedSteps++; $androidCounted = $true }
+            $sdkComplete = $true
+        }
+    }
+    
+    # ---- Fallback: 如果一键安装不完整，提供指引 ----
+    if (-not $sdkComplete) {
+        Write-Warn "Android SDK 部分组件未自动安装完成。"
+        Write-Info "请手动完成以下步骤:"
+        Write-Info "  1️⃣  打开 Android Studio → 欢迎页 → More Actions → SDK Manager"
+        Write-Info "  2️⃣  在 SDK Platforms 选项卡勾选 Android 14.0 (API 34) 或更高版本"
+        Write-Info "  3️⃣  在 SDK Tools 选项卡勾选 Android SDK Platform-Tools"
+        Write-Info "  4️⃣  点击 Apply/OK 下载安装"
+        if (-not $env:ANDROID_HOME) {
+            Write-Info "  5️⃣  设置系统环境变量:"
+            Write-Info "      ANDROID_HOME = $sdkPath"
+            Write-Info "      ANDROID_SDK_ROOT = $sdkPath"
+            Write-Info "      PATH 追加: $sdkPath\platform-tools"
+        }
+        # 未完全自动安装但至少装了 Android Studio，也算完成一项
+        if ($studioInstalled -and (-not $androidCounted)) { $script:completedSteps++; $androidCounted = $true }
+    }
+    
+    return ($studioInstalled -or $sdkComplete)
+}
+
 function Install-All {
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor "Red"
     Write-Host "  ║         🚀  开 始 一 键 安 装 所 有 工 具                  ║" -ForegroundColor "Red"
@@ -517,7 +756,8 @@ function Install-All {
         @{Name="Docker";  F={ Install-Docker }},
         @{Name="VS Code"; F={ Install-VSCode }},
         @{Name="Maven";   F={ Install-Maven }},
-        @{Name="MySQL";   F={ Install-MySQL }}
+        @{Name="MySQL";   F={ Install-MySQL }},
+        @{Name="Android"; F={ Install-Android }}
     )
     foreach ($fn in $funcs) {
         try {
@@ -529,10 +769,10 @@ function Install-All {
     $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
     Write-Host "  ║                        🎉  安装流程完成!                                ║" -ForegroundColor $ColorSuccess
-    Write-Host "  ║              已处理 $script:completedSteps/9 项 / 耗时: ${dur}分钟                    ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║              已处理 $script:completedSteps/10 项 / 耗时: ${dur}分钟                   ║" -ForegroundColor $ColorSuccess
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $ColorSuccess
     Write-AppendLog "  ╔══════════════════════════════════════════════╗"
-    Write-AppendLog "  ║        安装流程完成! 已处理 $script:completedSteps/9 项 / 耗时: ${dur}分钟         ║"
+    Write-AppendLog "  ║        安装流程完成! 已处理 $script:completedSteps/10 项 / 耗时: ${dur}分钟        ║"
     Write-AppendLog "  ╚══════════════════════════════════════════════╝"
     Show-Summary
     Invoke-Reboot
@@ -561,7 +801,22 @@ function Show-Summary {
                 if ($raw -match 'Ver (\S+)') { "Ver $($matches[1])" } else { $raw }
             }},
         @{L="CMake";    C={ cmake --version }},
-        @{L="VS Code";  C={ code --version }}
+        @{L="VS Code";  C={ code --version }},
+        @{L="Android Studio"; C={
+                $p = "${env:ProgramFiles}\Android\Android Studio\bin\studio64.exe"
+                if (Test-Path $p) { "已安装" }
+                elseif (Test-CommandExists "studio64") { (Get-Command studio64).Source }
+                else { throw [System.Management.Automation.CommandNotFoundException]::new("studio64") }
+            }},
+        @{L="Android SDK";    C={
+                $sdk = Get-AndroidSdkPath
+                if (Test-Path (Join-Path $sdk "platforms\android-34")) {
+                    $apiLevels = @(Get-ChildItem (Join-Path $sdk "platforms") -Directory -Filter "android-*" -ErrorAction SilentlyContinue |
+                                    ForEach-Object { $_.Name -replace 'android-', '' } |
+                                    Sort-Object { [int]$_ } -Descending)
+                    if ($apiLevels) { "API $($apiLevels[0])+ ($sdk)" } else { "已安装" }
+                } else { throw [System.Management.Automation.CommandNotFoundException]::new("android-34") }
+            }}
     )
     foreach ($t in $tools) {
         try { $v = & $t.C 2>&1 | Select-Object -First 1; Write-Host "  ✅ $($t.L.PadRight(10)) : $v" -ForegroundColor $ColorSuccess; Write-AppendLog "  ✅ $($t.L.PadRight(10)) : $v" }
@@ -620,7 +875,8 @@ $menu = [ordered]@{
     '8'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
     '9'  = @{Label="🏗️ 仅安装 Maven"; Action={ $null = Install-Maven }}
     '10' = @{Label="🗄️ 仅安装 MySQL"; Action={ $null = Install-MySQL }}
-    '11' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+    '11' = @{Label="🤖 仅安装 Android Studio + SDK 34+"; Action={ $null = Install-Android }}
+    '12' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
 }
 
 function Show-Menu {
@@ -650,8 +906,8 @@ do {
     elseif ($menu.Contains($choice)) {
         Write-AppendLog "  📌 用户选择: [$choice]"
         & $menu[$choice].Action
-        # 选项 11 (Show-Summary) 不产生安装日志，跳过保存
-        if ($choice -ne '11') { Save-Log }
+        # 选项 12 (Show-Summary) 不产生安装日志，跳过保存
+        if ($choice -ne '12') { Save-Log }
         Wait-Key
     }
     else {

@@ -14,7 +14,9 @@ $b64 = Get-Content $b64File -Raw
 
 Write-Host "[2/2] Decoding to setup_dev_env.ps1..." -ForegroundColor Cyan
 $bytes = [Convert]::FromBase64String($b64)
-[System.IO.File]::WriteAllBytes($outFile, $bytes)
+# 写入带 UTF-8 BOM 头，确保 Windows PowerShell 正确识别为 UTF-8
+$utf8Bom = [System.Text.Encoding]::UTF8.GetPreamble()
+[System.IO.File]::WriteAllBytes($outFile, $utf8Bom + $bytes)
 
 # 完整性校验: 验证文件已正确写入
 if (-not (Test-Path $outFile)) {
@@ -23,8 +25,9 @@ if (-not (Test-Path $outFile)) {
     exit 1
 }
 $writtenBytes = (Get-Item $outFile).Length
-if ($writtenBytes -ne $bytes.Length) {
-    Write-Host "FAILED: File size mismatch (expected $($bytes.Length) bytes, got $writtenBytes bytes)." -ForegroundColor Red
+$expectedBytes = $bytes.Length + $utf8Bom.Length
+if ($writtenBytes -ne $expectedBytes) {
+    Write-Host "FAILED: File size mismatch (expected $expectedBytes bytes, got $writtenBytes bytes)." -ForegroundColor Red
     Write-Host "The output file may be corrupted. Please retry." -ForegroundColor Red
     Remove-Item $outFile -Force -ErrorAction SilentlyContinue
     Read-Host "Press Enter to exit"
