@@ -68,7 +68,9 @@ $patternChecks = @(
     @{Name="winget 退出码解释 Get-WingetExitHint"; Pass=($content -match "function Get-WingetExitHint" -and $content -match "0x8A150014")},
     @{Name="Maven 阿里云镜像回退"; Pass=($content -match "mirrors\.aliyun\.com")},
     @{Name="下载停滞检测"; Pass=($content -match "StallSeconds" -and $content -match "停滞")},
-    @{Name="下载自动重试"; Pass=($content -match "Retries" -and $content -match "重试")}
+    @{Name="下载自动重试"; Pass=($content -match "Retries" -and $content -match "重试")},
+    @{Name="断点续传 Range"; Pass=($content -match "RangeHeaderValue" -and $content -match "PartialContent" -and $content -match "Append")},
+    @{Name="代理感知环境变量"; Pass=($content -match "HTTPS_PROXY" -and $content -match "WebProxy")}
 )
 
 $allPatternsPass = $true

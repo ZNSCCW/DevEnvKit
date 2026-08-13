@@ -113,9 +113,11 @@ function Format-Size {
     else { return "$([math]::Round($Bytes / 1GB, 2)) GB" }
 }
 
-# 流式下载 + 实时进度条：自动换单位、显示总大小与百分比、显示速度
-# 用 Write-Progress 原生进度条（不刷屏），替代 Invoke-WebRequest 的逐行进度
-# 增强：① 停滞检测（15s 无数据视为卡死中断）；② 失败自动重试（默认 2 次）；③ 失败删除半成品
+# 流式下载 + 实时进度条 + 断点续传 + 代理感知
+# - 进度条：自动换单位、显示总大小/百分比/速度（Write-Progress 原生，不刷屏）
+# - 断点续传：本地有半成品时发 Range 请求；服务器返回 206 且 Content-Range 起始匹配则续写，否则删掉全量重下
+# - 代理感知：读取 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 环境变量（curl 生态习惯）；未设置则用系统代理
+# - 停滞检测：15s 无数据判定卡死；失败自动重试（默认 2 次），失败保留半成品供下次续传
 function Download-WithProgress {
     param(
         [string]$Uri,
@@ -125,19 +127,62 @@ function Download-WithProgress {
         [int]$StallSeconds = 15
     )
     for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+        $client = $null; $response = $null; $stream = $null; $fs = $null
         try {
-            $client = [System.Net.Http.HttpClient]::new()
-            $client.Timeout = [TimeSpan]::FromMinutes(10)  # 总超时放宽，靠停滞检测兜底慢速网络
-            $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            # 代理感知：环境变量优先（PowerShell $env: 不区分大小写，HTTPS_PROXY/https_proxy 均命中），未设置走系统代理
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $proxyVar = $env:HTTPS_PROXY
+            if (-not $proxyVar) { $proxyVar = $env:HTTP_PROXY }
+            if (-not $proxyVar) { $proxyVar = $env:ALL_PROXY }
+            if ($proxyVar) {
+                try {
+                    $handler.Proxy = [System.Net.WebProxy]::new($proxyVar)
+                    $handler.UseProxy = $true
+                    $proxyHost = $proxyVar -replace '^https?://', '' -replace '/.*$', ''
+                    Write-Info "使用代理: $proxyHost"
+                } catch { Write-Warn "代理配置无效，改用直连" }
+            }
+            $client = [System.Net.Http.HttpClient]::new($handler)
+            $client.Timeout = [TimeSpan]::FromMinutes(10)
+
+            # 断点续传：本地半成品存在则尝试 Range
+            $existing = 0L
+            $downloaded = 0L
+            $isResume = $false
+            if (Test-Path $OutFile) { $existing = (Get-Item $OutFile).Length }
+            $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Uri)
+            if ($existing -gt 0) {
+                $request.Headers.Range = [System.Net.Http.Headers.RangeHeaderValue]::From($existing, $null)
+            }
+            $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            if ($response.StatusCode -eq [System.Net.HttpStatusCode]::PartialContent) {
+                $cr = $response.Content.Headers.ContentRange
+                if ($cr -and $cr.From -eq $existing) {
+                    $isResume = $true; $downloaded = $existing
+                    Write-Info "断点续传: 从 $(Format-Size $existing) 继续"
+                } else {
+                    Remove-Item $OutFile -Force -ErrorAction SilentlyContinue  # 起始不匹配，删掉全量重下
+                    $downloaded = 0L
+                }
+            } elseif ($existing -gt 0) {
+                Write-Warn "该源不支持断点续传，全量重新下载"
+                Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+                $downloaded = 0L
+            }
             $response.EnsureSuccessStatusCode()
-            $totalBytes = $response.Content.Headers.ContentLength  # 服务器可能不返回，为 null
+
+            $totalBytes = $response.Content.Headers.ContentLength
             $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-            $fs = [System.IO.File]::Create($OutFile)
+            $fs = if ($isResume) {
+                [System.IO.File]::Open($OutFile, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write)
+            } else {
+                [System.IO.File]::Create($OutFile)
+            }
             $buffer = New-Object byte[] 81920
-            $read = 0; $downloaded = 0L
+            $read = 0
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $lastProgress = [DateTime]::Now
-            $lastDownloaded = 0L
+            $lastDownloaded = $downloaded
             $name = $Uri.Split('/')[-1]
             while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
                 $fs.Write($buffer, 0, $read)
@@ -156,17 +201,20 @@ function Download-WithProgress {
                 Write-Progress -Activity "$Activity ($name)" -Status $status -PercentComplete $(if ($pct -ge 0) { $pct } else { -1 })
             }
             $sw.Stop()
-            $fs.Close(); $stream.Dispose(); $response.Dispose(); $client.Dispose()
             Write-Progress -Activity "$Activity" -Completed
             return $true
         } catch {
             Write-Progress -Activity "$Activity" -Completed
-            if (Test-Path $OutFile) { Remove-Item $OutFile -Force -ErrorAction SilentlyContinue }  # 清理半成品
+            # 清理本次句柄；失败保留半成品文件（供下次断点续传）
+            if ($fs) { try { $fs.Dispose() } catch {} }
+            if ($stream) { try { $stream.Dispose() } catch {} }
+            if ($response) { try { $response.Dispose() } catch {} }
+            if ($client) { try { $client.Dispose() } catch {} }
             if ($attempt -lt $Retries) {
                 Write-Warn "下载失败 (第 $($attempt + 1)/$($Retries + 1) 次): $($_.Exception.Message)，3 秒后重试..."
                 Start-Sleep -Seconds 3
             } else {
-                Write-Warn "下载失败: $($_.Exception.Message)"
+                Write-Warn "下载失败: $($_.Exception.Message)（已保留半成品，下次运行自动断点续传）"
             }
         }
     }
@@ -753,7 +801,7 @@ function Invoke-DownloadWithFallback {
             return $true
         } catch {
             Write-Warn "失败 ($($url.Split('/')[2])): $_"
-            Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+            # 保留半成品文件：Download-WithProgress 下次会自动断点续传（同一文件内容一致）
         }
     }
     return $false
