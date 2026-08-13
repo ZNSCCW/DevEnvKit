@@ -283,23 +283,31 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 `[1] 一键安装全部` 的完整流程:
 
 ```
-  1. Git          → 检测版本 → 确认 → 安装
-  2. Python 3.12  → 检测版本 → 确认 → 安装 → 验证 pip
-  3. Java JDK 21  → 检测版本 → 确认 → 安装 → 配置 JAVA_HOME
-  4. C/C++ 工具   → 检测编译器(GCC/Clang/MSVC) → 确认 → 安装 MinGW → 安装 CMake
-  5. Node.js LTS  → 检测版本 → 确认 → 安装 → 验证 npm
-  6. Docker       → 检测版本 → 确认 → 安装
-  7. VS Code      → 检测版本 → 确认 → 安装
-  8. Maven        → 检测版本 → 确认 → 安装 → 配置 MAVEN_HOME
-  9. MySQL        → 检测版本 → 确认 → 安装 → 初始化指引
-  10. Android     → 检测版本 → 确认 → 安装 Android Studio → 腾讯云镜像下载 SDK 组件 → 配置 ANDROID_HOME + PATH
+  1. Git              → 检测 → 确认 → winget 安装
+  2. 7-Zip            → 检测 → 确认 → winget 安装
+  3. Python           → 版本选择(3.11/3.12/3.13) → 检测 → 确认 → 安装 → 验证 pip
+  4. Java JDK         → 版本选择(8/11/17/21) → 检测 → 确认 → 安装 → 配置 JAVA_HOME
+  5. C/C++ 工具       → 检测编译器(GCC/Clang/MSVC) → 确认 → MSYS2 + pacman 装 MinGW → 装 CMake
+  6. Node.js          → 版本选择(20/22 LTS) → 检测 → 确认 → 安装 → 验证 npm
+  7. Maven            → 检测 → 确认 → Apache 官方源下载(阿里云镜像回退) → 配置 MAVEN_HOME
+  8. MySQL            → 检测 → 确认 → winget 安装 → 初始化指引
+  9. Redis            → 检测 → 确认 → winget 安装
+  10. DBeaver         → 检测 → 确认 → winget 安装
+  11. Docker          → 检测 → 确认 → winget 安装
+  12. kubectl         → 检测 → 确认 → winget 安装
+  13. Miniconda       → 检测 → 确认 → winget 安装
+  14. VS Code         → 检测 → 确认 → winget 安装
+  15. Windows Terminal→ 检测 → 确认 → winget 安装
+  16. PowerToys       → 检测 → 确认 → winget 安装
+  17. Android         → 检测 → 确认 → 装 Android Studio → 腾讯云镜像下载 SDK 组件 → 配置 ANDROID_HOME + PATH
 ```
 
 每个步骤都会:
 1. 检查该工具是否已安装
 2. 如已安装则展示**当前版本**，询问是否重新安装/升级 (Y/N)
-3. 如未安装则通过 winget 下载安装
-4. 通过 `Invoke-Installer` 统一刷新 `PATH` (`Update-Path`)
+3. 如未安装则安装——winget 安装 / Maven 官方源 / Android 腾讯云镜像（下载全程带**进度条 + 停滞检测 + 自动重试 + 断点续传 + 代理感知**）
+4. Java / Python / Node.js 安装前先**选择版本**（回车用推荐）
+5. 安装后统一刷新 `PATH`（`Update-Path`），并同步实时日志
 
 安装完成后:
 - 展示 **23 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code/Android Studio/Android SDK/7-Zip/WinTerminal/PowerToys/Redis/Miniconda/kubectl/DBeaver)
