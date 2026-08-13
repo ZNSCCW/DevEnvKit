@@ -23,21 +23,8 @@ if not defined PS_EXE (
     exit /b 1
 )
 
-:: b64.txt 是纯 ASCII 编码，不受传输损坏影响
-:: 每次启动都从 b64.txt 还原，确保文件编码正确
-if exist "b64.txt" (
-    if exist "decode.ps1" (
-        echo.
-        echo  [>] 正在从 b64.txt 还原 setup_dev_env.ps1 (确保编码正确)
-        %PS_EXE% -ExecutionPolicy Bypass -NoProfile -File "%~dp0decode.ps1"
-        if errorlevel 1 (
-            echo  [X] 解码失败，按任意键退出。
-            pause >nul
-            exit /b 1
-        )
-        echo.
-    )
-)
+:: b64.txt 编码传输机制已移除（v1.4+），脚本直接以 UTF-8 保存
+:: 无需解码，直接运行 setup_dev_env.ps1
 
 echo.
 echo   正在启动 PowerShell 脚本...

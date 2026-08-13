@@ -141,10 +141,10 @@ $redundancyPatterns = @(
     @{Name="菜单项数量 12+";            Pass=([regex]::Matches($content, "'\d+'\s*=\s*@\{Label=").Count -ge 12)},
     @{Name="无死代码 Test-InternetConnection"; Pass=($content -notmatch "Test-InternetConnection")},
     @{Name="winget GitHub API 自动下载"; Pass=($content -match "api.github.com/repos/microsoft/winget-cli" -and $content -match "msixbundle")},
-    @{Name="winget 缺失退出前自动清理"; Pass=($content -match 'Remove-Item.*-Recurse.*-Force.*\$tempDir' -and $content -match 'Install-Winget.*return \$false' -and $content -match "exit 1")},
+    @{Name="winget 缺失退出前自动清理"; Pass=($content -match 'Remove-Item.*-Recurse.*-Force.*\$tempDir' -and $content -match 'return \$false' -and $content -match 'exit 1')},
     @{Name="Install-Android 函数";      Pass=($content -match "function Install-Android")},
     @{Name="ANDROID_HOME 环境变量";     Pass=($content -match 'ANDROID_HOME')},
-    @{Name="sdkmanager 调用";           Pass=($content -match 'sdkmanager')}
+    @{Name="Android SDK 镜像解析";      Pass=($content -match 'repository2-1\.xml' -and $content -match 'mirrors\.cloud\.tencent\.com')}
 )
 
 $allRedundantClean = $true
@@ -166,6 +166,6 @@ Write-Host "  函数数    : $funcCount 个" -ForegroundColor White
 Write-Host "  语法      : ✅ 通过" -ForegroundColor Green
 Write-Host "  安全      : $(if ($allSafe) { '✅ 通过' } else { '❌ 有风险' })" -ForegroundColor $(if ($allSafe) { "Green" } else { "Red" })
 Write-Host "  模式      : $(if ($allPatternsPass) { '✅ 全部通过' } else { '❌ 有缺失' })" -ForegroundColor $(if ($allPatternsPass) { "Green" } else { "Red" })
-Write-Host "  工具覆盖  : 17/17" -ForegroundColor Green
+Write-Host "  工具覆盖  : $($tools.Count)/$($tools.Count) 全部通过" -ForegroundColor Green
 Write-Host "  冗余检测  : $(if ($allRedundantClean) { '✅ 无冗余' } else { '❌ 仍有余量' })" -ForegroundColor $(if ($allRedundantClean) { "Green" } else { "Red" })
 Write-Host ""

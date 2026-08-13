@@ -769,10 +769,10 @@ function Install-All {
     $dur = ((Get-Date) - $startTime).TotalMinutes.ToString("F1")
     Write-Host "`n  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $ColorSuccess
     Write-Host "  ║                        🎉  安装流程完成!                                ║" -ForegroundColor $ColorSuccess
-    Write-Host "  ║              已处理 $script:completedSteps/10 项 / 耗时: ${dur}分钟                   ║" -ForegroundColor $ColorSuccess
+    Write-Host "  ║              已处理 $script:completedSteps/$($funcs.Count) 项 / 耗时: ${dur}分钟                   ║" -ForegroundColor $ColorSuccess
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $ColorSuccess
     Write-AppendLog "  ╔══════════════════════════════════════════════╗"
-    Write-AppendLog "  ║        安装流程完成! 已处理 $script:completedSteps/10 项 / 耗时: ${dur}分钟        ║"
+    Write-AppendLog "  ║        安装流程完成! 已处理 $script:completedSteps/$($funcs.Count) 项 / 耗时: ${dur}分钟        ║"
     Write-AppendLog "  ╚══════════════════════════════════════════════╝"
     Show-Summary
     Invoke-Reboot
