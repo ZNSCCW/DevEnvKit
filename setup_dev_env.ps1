@@ -1,6 +1,6 @@
 ﻿<#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.4
+  🛠️  开发环境一键配置工具  v1.6
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -50,7 +50,7 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.4           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.6           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
@@ -86,18 +86,114 @@ function Request-Confirmation {
     Write-Warn "已跳过 $ToolName (保留当前版本: $InstalledVersion)"; Write-AppendLog "  ❓ 用户选择: 跳过 $ToolName"; return $false
 }
 
+# 版本选择器：Versions = @(@{Label="..."; PackageId="..."})，返回选中的项（默认第 1 项）
+function Select-Version {
+    param([string]$ToolName, [array]$Versions)
+    Write-Host "`n  ── 选择要安装的 $ToolName 版本 ──" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 选择 $ToolName 版本 ──"
+    for ($i = 0; $i -lt $Versions.Count; $i++) {
+        Write-Host "    [$($i + 1)]  $($Versions[$i].Label)" -ForegroundColor $ColorMenu
+    }
+    Write-Host "  ❓ 请输入版本编号 [1-$($Versions.Count)]，直接回车用第 1 项: " -NoNewline -ForegroundColor $ColorPrompt
+    $sel = (Read-Host).Trim()
+    $idx = 0
+    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $Versions.Count) { $idx = [int]$sel - 1 }
+    else { Write-Warn "输入无效，默认选择第 1 项" }
+    Write-Info "已选择: $($Versions[$idx].Label)"
+    Write-AppendLog "  ❓ 版本选择: $($Versions[$idx].Label)"
+    return $Versions[$idx]
+}
+
+# 大小自动换单位：B → KB → MB → GB
+function Format-Size {
+    param([double]$Bytes)
+    if ($Bytes -lt 1KB) { return "$([math]::Round($Bytes)) B" }
+    elseif ($Bytes -lt 1MB) { return "$([math]::Round($Bytes / 1KB, 1)) KB" }
+    elseif ($Bytes -lt 1GB) { return "$([math]::Round($Bytes / 1MB, 1)) MB" }
+    else { return "$([math]::Round($Bytes / 1GB, 2)) GB" }
+}
+
+# 流式下载 + 实时进度条：自动换单位、显示总大小与百分比、显示速度
+# 用 Write-Progress 原生进度条（不刷屏），替代 Invoke-WebRequest 的逐行进度
+function Download-WithProgress {
+    param(
+        [string]$Uri,
+        [string]$OutFile,
+        [string]$Activity = "下载中"
+    )
+    try {
+        $client = [System.Net.Http.HttpClient]::new()
+        $client.Timeout = [TimeSpan]::FromSeconds(300)
+        $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        $response.EnsureSuccessStatusCode()
+        $totalBytes = $response.Content.Headers.ContentLength  # 服务器可能不返回，为 null
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $fs = [System.IO.File]::Create($OutFile)
+        $buffer = New-Object byte[] 81920
+        $read = 0; $downloaded = 0L
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $name = $Uri.Split('/')[-1]
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $fs.Write($buffer, 0, $read)
+            $downloaded += $read
+            $pct = -1
+            if ($totalBytes -gt 0) { $pct = [math]::Min(100, [math]::Round($downloaded * 100.0 / $totalBytes, 1)) }
+            $status = "已下载 $(Format-Size $downloaded)"
+            if ($totalBytes -gt 0) { $status += " / 共 $(Format-Size $totalBytes) ($pct%)" }
+            $speed = $downloaded / [math]::Max(1, $sw.Elapsed.TotalSeconds)
+            $status += "   速度 $(Format-Size $speed)/s"
+            Write-Progress -Activity "$Activity ($name)" -Status $status -PercentComplete $(if ($pct -ge 0) { $pct } else { -1 })
+        }
+        $sw.Stop()
+        $fs.Close(); $stream.Dispose(); $response.Dispose(); $client.Dispose()
+        Write-Progress -Activity "$Activity" -Completed
+        return $true
+    } catch {
+        Write-Progress -Activity "$Activity" -Completed
+        Write-Warn "下载失败: $_"
+        if (Test-Path $OutFile) { Remove-Item $OutFile -Force -ErrorAction SilentlyContinue }
+        return $false
+    }
+}
+
+# winget 常见退出码说明（安装失败时给出可行动提示）
+function Get-WingetExitHint {
+    param([int]$Code)
+    switch ($Code) {
+        0x8A150014 { return "包已安装（视为成功，可跳过）" }
+        0x8A150016 { return "已存在相同版本（视为成功，可跳过）" }
+        0x8A150019 { return "需要同意源/包协议——脚本已带 --accept 参数，若仍失败请检查 winget 源" }
+        0x8A15002F { return "需要提权——请以管理员身份重新运行本脚本" }
+        0x8A15003C { return "软件源不可达——请检查网络/代理" }
+        0x8A150078 { return "包被第三方托管，请检查安全提示" }
+        default { return "" }
+    }
+}
+
 # winget 安装 (--disable-interactivity 禁用 spinner 干扰输出)
 function Invoke-WingetInstall {
     param([string]$PackageId, [string]$DisplayName)
     Write-Step "正在安装 $DisplayName ..."
     $r = winget install --id $PackageId --disable-interactivity --accept-source-agreements --accept-package-agreements 2>&1
-    if ($LASTEXITCODE -eq 0 -or $r -match "已安装|已找到已安装|No applicable update|already installed|Successfully installed") {
+    $code = $LASTEXITCODE
+    if ($code -eq 0 -or $r -match "已安装|已找到已安装|No applicable update|already installed|Successfully installed") {
         Write-OK "$DisplayName 安装成功 (或已安装)"; return $true
     }
     elseif ($r -match "InternetOpenUrl|0x80072efd|0x80072ee7|0x80072f8f") {
-        Write-Fail "$DisplayName 安装失败: 无法连接到互联网"; return $false
+        Write-Fail "$DisplayName 安装失败: 无法连接到互联网"
+        Write-Info "请检查网络后重试，或到官网手动下载安装"; return $false
     }
-    Write-Fail "$DisplayName 安装失败"; Write-Info "详情: $r"; return $false
+    elseif ($r -match "No package found|找不到与输入条件匹配") {
+        Write-Fail "$DisplayName 安装失败: winget 中找不到该包 (PackageId=$PackageId)"
+        Write-Info "可用 'winget search $DisplayName' 查找正确包名，或到官网手动下载"; return $false
+    }
+    # 通用失败：解释退出码 + 给可执行建议（保证"不会装不了"的可排查性）
+    Write-Fail "$DisplayName 安装失败 (退出码 0x$($code.ToString('X8')))"
+    $hint = Get-WingetExitHint -Code $code
+    if ($hint) { Write-Info $hint }
+    Write-Info "可重试本项，或手动执行: winget install --id $PackageId"
+    Write-Info "详情: $($r | Select-Object -Last 2)"
+    return $false
 }
 
 # 检测 MySQL（即使不在 PATH 中也能探测）
@@ -202,9 +298,11 @@ function Install-Winget {
         $asset = $releaseInfo.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
         
         if ($asset) {
-            Write-Info "下载: $($asset.name) ($([math]::Round($asset.size/1MB, 1)) MB)"
+            Write-Info "下载: $($asset.name) ($(Format-Size $asset.size))"
             $installerPath = Join-Path $tempDir $asset.name
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -TimeoutSec 120 -ErrorAction Stop
+            if (-not (Download-WithProgress -Uri $asset.browser_download_url -OutFile $installerPath -Activity "下载 winget")) {
+                throw "winget 下载失败"
+            }
             # 完整性校验: 文件存在且大小 > 1MB
             if ((-not (Test-Path $installerPath)) -or ((Get-Item $installerPath).Length -lt 1MB)) {
                 throw "下载文件不完整或为空"
@@ -260,24 +358,51 @@ function Install-Git {
 }
 
 function Install-Python {
-    $r = Invoke-Installer -ToolName "🐍 Python" -ExeName "python" -PackageId "Python.Python.3.12" -DisplayName "Python 3.12" `
-        -TargetDesc "Python 3.12.x (最新小版本)" -VersionCmd { python --version }
+    $choice = Select-Version -ToolName "Python" -Versions @(
+        @{Label="Python 3.12 (推荐)"; PackageId="Python.Python.3.12"},
+        @{Label="Python 3.13";        PackageId="Python.Python.3.13"},
+        @{Label="Python 3.11";        PackageId="Python.Python.3.11"}
+    )
+    Write-Host "`n  ── 🐍 Python ($($choice.Label)) ──────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── Python ($($choice.Label)) ──"
+    if (Test-CommandExists "python") {
+        $ver = Get-InstalledVersion { python --version }
+        if (-not (Request-Confirmation -ToolName "Python" -InstalledVersion $ver -TargetDesc $choice.Label)) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId $choice.PackageId -DisplayName $choice.Label
     if (Test-CommandExists "pip") { Write-OK "pip 可用" -NoCount } else { Write-Warn "pip 未找到，请手动验证 Python 安装" }
+    Update-Path
     return $r
 }
 
 function Install-Java {
-    $r = Invoke-Installer -ToolName "☕ Java (JDK)" -ExeName "java" -PackageId "EclipseAdoptium.Temurin.21.JDK" `
-        -DisplayName "Eclipse Temurin JDK 21 (LTS)" -TargetDesc "Eclipse Temurin JDK 21 (LTS)" -VersionCmd { java -version 2>&1 }
-    # 设置 JAVA_HOME
+    # 版本选择：Temurin 各版本 PackageId 均已实测存在
+    $choice = Select-Version -ToolName "Java JDK" -Versions @(
+        @{Label="JDK 21 (LTS, 推荐)"; PackageId="EclipseAdoptium.Temurin.21.JDK"},
+        @{Label="JDK 17 (LTS)";       PackageId="EclipseAdoptium.Temurin.17.JDK"},
+        @{Label="JDK 11 (LTS)";       PackageId="EclipseAdoptium.Temurin.11.JDK"},
+        @{Label="JDK 8 (LTS)";        PackageId="EclipseAdoptium.Temurin.8.JDK"}
+    )
+    Write-Host "`n  ── ☕ Java ($($choice.Label)) ────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── Java ($($choice.Label)) ──"
+    if (Test-CommandExists "java") {
+        $ver = Get-InstalledVersion { java -version 2>&1 }
+        if (-not (Request-Confirmation -ToolName "Java" -InstalledVersion $ver -TargetDesc $choice.Label)) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId $choice.PackageId -DisplayName $choice.Label
+    # 设置 JAVA_HOME（搜索所有已装 Temurin JDK，取最新）
     try {
         if (-not ${env:JAVA_HOME}) {
-            foreach ($p in "C:\Program Files\Eclipse Adoptium\jdk-21*\") {
-                $f = Get-Item $p -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-                if ($f) { [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $f.FullName, "Machine"); Write-OK "JAVA_HOME 已设置为: $($f.FullName)" -NoCount; break }
-            }
+            $latest = Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue |
+                      Sort-Object Name -Descending | Select-Object -First 1
+            if ($latest) { [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $latest.FullName, "Machine"); Write-OK "JAVA_HOME 已设置为: $($latest.FullName)" -NoCount }
         }
     } catch { Write-Warn "JAVA_HOME 设置失败，请手动配置" }
+    Update-Path
     return $r
 }
 
@@ -304,7 +429,8 @@ function Install-CPP {
     if ($doCompilerInstall) {
         Write-Step $(if ($compilerFound) { "正在安装/升级 MinGW-w64 (GCC/G++) ..." } else { "未检测到 C/C++ 编译器，正在安装 MinGW-w64 (GCC/G++) ..." })
         $mingwInstalled = $false
-        foreach ($e in @(@{Id="niXman.mingw-w64"; Name="MinGW-w64 (独立版)"}, @{Id="MSYS2.MSYS2"; Name="MSYS2 (含 MinGW-w64)"})) {
+        # winget 无 niXman.mingw-w64 包（实测不存在），MSYS2 为唯一可靠方案
+        foreach ($e in @(@{Id="MSYS2.MSYS2"; Name="MSYS2 (含 MinGW-w64)"})) {
             $mingwInstalled = Invoke-WingetInstall -PackageId $e.Id -DisplayName $e.Name
             if ($mingwInstalled) {
                 if ($e.Id -eq "MSYS2.MSYS2") {
@@ -358,12 +484,24 @@ function Install-CPP {
 }
 
 function Install-NodeJS {
-    $r = Invoke-Installer -ToolName "🟢 Node.js" -ExeName "node" -PackageId "OpenJS.NodeJS.LTS" -DisplayName "Node.js (LTS)" `
-        -TargetDesc "Node.js LTS (当前为 22.x)" -VersionCmd { node --version }
+    $choice = Select-Version -ToolName "Node.js" -Versions @(
+        @{Label="Node.js 22 (LTS, 推荐)"; PackageId="OpenJS.NodeJS.LTS"},
+        @{Label="Node.js 20 (LTS)";       PackageId="OpenJS.NodeJS.20"}
+    )
+    Write-Host "`n  ── 🟢 Node.js ($($choice.Label)) ──────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── Node.js ($($choice.Label)) ──"
+    if (Test-CommandExists "node") {
+        $ver = Get-InstalledVersion { node --version }
+        if (-not (Request-Confirmation -ToolName "Node.js" -InstalledVersion $ver -TargetDesc $choice.Label)) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId $choice.PackageId -DisplayName $choice.Label
     if (Test-CommandExists "npm") {
         try { Write-OK "npm 可用 (版本: $(npm --version 2>&1 | Select-Object -First 1))" -NoCount }
         catch { Write-Warn "npm 已安装但执行异常，请手动验证" }
     }
+    Update-Path
     return $r
 }
 
@@ -407,8 +545,8 @@ function Install-PowerToys {
 }
 
 function Install-Redis {
-    return Invoke-Installer -ToolName "🔴 Redis" -ExeName "redis-cli" -PackageId "tporadowski.Redis" `
-        -DisplayName "Redis for Windows" -TargetDesc "Redis for Windows (tporadowski)" -VersionCmd { redis-cli --version 2>&1 }
+    return Invoke-Installer -ToolName "🔴 Redis" -ExeName "redis-cli" -PackageId "Redis.Redis" `
+        -DisplayName "Redis for Windows" -TargetDesc "Redis on Windows (官方, winget 包 Redis.Redis)" -VersionCmd { redis-cli --version 2>&1 }
 }
 
 function Install-Miniconda {
@@ -422,7 +560,7 @@ function Install-Kubectl {
 }
 
 function Install-DBeaver {
-    return Invoke-Installer -ToolName "🗄️ DBeaver" -ExeName "dbeaver" -PackageId "DBeaver.DBeaverCommunity" `
+    return Invoke-Installer -ToolName "🗄️ DBeaver" -ExeName "dbeaver" -PackageId "DBeaver.DBeaver.Community" `
         -DisplayName "DBeaver Community" -TargetDesc "DBeaver (数据库图形化管理工具)" -VersionCmd { dbeaver --version 2>&1 }
 }
 
@@ -474,12 +612,14 @@ function Install-Maven {
         
         # 下载
         Write-Info "正在下载 Apache Maven $mavenVersion ..."
-        Invoke-WebRequest -Uri $mavenZipUrl -OutFile $tempZip -TimeoutSec 120 -ErrorAction Stop
+        if (-not (Download-WithProgress -Uri $mavenZipUrl -OutFile $tempZip -Activity "下载 Apache Maven $mavenVersion")) {
+            throw "Maven 下载失败"
+        }
         
         if (-not (Test-Path $tempZip) -or (Get-Item $tempZip).Length -lt 1MB) {
             throw "下载文件不完整或为空"
         }
-        Write-OK "下载完成 ($([math]::Round((Get-Item $tempZip).Length / 1MB, 1)) MB)" -NoCount
+        Write-OK "下载完成 ($(Format-Size (Get-Item $tempZip).Length))" -NoCount
         
         # 解压
         Write-Info "正在解压到 $mavenHome ..."
@@ -573,7 +713,8 @@ function Invoke-DownloadWithFallback {
     foreach ($url in $Urls) {
         try {
             Write-Info "尝试下载: $url"
-            Invoke-WebRequest -Uri $url -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $ok = Download-WithProgress -Uri $url -OutFile $OutFile -Activity "下载 Android SDK 组件"
+            if (-not $ok) { throw "下载失败" }
             if (-not (Test-Path $OutFile) -or (Get-Item $OutFile).Length -lt ($MinSizeMB * 1MB)) {
                 throw "下载文件不完整或为空"
             }

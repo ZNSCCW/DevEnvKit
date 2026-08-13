@@ -59,7 +59,7 @@ $patternChecks = @(
     @{Name="JAVA_HOME 设置"; Pass=($content -match 'JAVA_HOME')},
     @{Name="MAVEN_HOME 设置"; Pass=($content -match 'MAVEN_HOME')},
     @{Name="安装日志保存"; Pass=($content -match 'Save-Log|install_log_')},
-    @{Name="niXman.mingw-w64 优先 MSYS2"; Pass=($content -match "niXman.mingw-w64") -and ($content.IndexOf("niXman.mingw-w64") -lt $content.IndexOf("MSYS2.MSYS2"))},
+    @{Name="MSYS2 提供 MinGW-w64"; Pass=($content -match "MSYS2.MSYS2")},
     @{Name="MSYS2 PATH 手动追加"; Pass=($content -match "msys64\\\\mingw64\\\\bin" -or $content -match 'msys64\\mingw64\\bin')},
     @{Name="编译器独立检测 ArrayList"; Pass=($content -match "ArrayList")}
 )
@@ -103,24 +103,24 @@ $tools = @(
     @{Name="pip";      Install="";                              Summary="pip --version"},
     @{Name="Java JDK"; Install="EclipseAdoptium.Temurin.21.JDK"; Summary="java -version"},
     @{Name="javac";    Install="";                              Summary="javac --version"},
-    @{Name="GCC";      Install="niXman.mingw-w64";              Summary="gcc --version"},
-    @{Name="G++";      Install="niXman.mingw-w64";              Summary="g++ --version"},
+    @{Name="GCC";      Install="MSYS2.MSYS2";                   Summary="gcc --version"},
+    @{Name="G++";      Install="MSYS2.MSYS2";                   Summary="g++ --version"},
     @{Name="Node.js";  Install="OpenJS.NodeJS.LTS";             Summary="node --version"},
     @{Name="npm";      Install="";                              Summary="npm --version"},
     @{Name="Docker";   Install="Docker.DockerDesktop";          Summary="docker --version"},
     @{Name="CMake";    Install="Kitware.CMake";                 Summary="cmake --version"},
     @{Name="VS Code";  Install="Microsoft.VisualStudioCode";    Summary="code --version"},
-    @{Name="Maven";    Install="Apache.Maven";                  Summary="mvn --version"},
+    @{Name="Maven";    Install="dlcdn.apache.org/maven";        Summary="mvn --version"},
     @{Name="MySQL";    Install="Oracle.MySQL";                  Summary="mysql --version"},
     @{Name="Android Studio"; Install="Google.AndroidStudio";     Summary="android-studio"},
     @{Name="Android SDK";    Install="";                        Summary="android-34"},
     @{Name="7-Zip";     Install="7zip.7zip";                 Summary="7z --help"},
     @{Name="WinTerminal"; Install="Microsoft.WindowsTerminal"; Summary="wt --version"},
     @{Name="PowerToys"; Install="Microsoft.PowerToys";       Summary="PowerToys"},
-    @{Name="Redis";     Install="tporadowski.Redis";         Summary="redis-cli --version"},
+    @{Name="Redis";     Install="Redis.Redis";                Summary="redis-cli --version"},
     @{Name="Miniconda"; Install="Anaconda.Miniconda3";       Summary="conda --version"},
     @{Name="kubectl";   Install="Kubernetes.kubectl";        Summary="kubectl version"},
-    @{Name="DBeaver";   Install="DBeaver.DBeaverCommunity";  Summary="dbeaver --version"}
+    @{Name="DBeaver";   Install="DBeaver.DBeaver.Community"; Summary="dbeaver --version"}
 )
 
 foreach ($t in $tools) {

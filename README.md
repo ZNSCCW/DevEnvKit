@@ -1,4 +1,4 @@
-# 🛠️ 开发环境一键配置工具 v1.4
+# 🛠️ 开发环境一键配置工具 v1.6
 
 适用于 **Windows 10/11** 的开发环境快速部署工具，通过 Windows 包管理器 (winget) 自动安装主流开发工具。
 
@@ -23,10 +23,10 @@
 | 工具 | winget Package ID | 备注 |
 |------|-------------------|------|
 | **Java JDK 21 LTS** | `EclipseAdoptium.Temurin.21.JDK` | 自动配置 `JAVA_HOME` |
-| **Apache Maven** | `Apache.Maven` | 自动配置 `MAVEN_HOME` |
+| **Apache Maven** | 官方源 `dlcdn.apache.org` | 自动配置 `MAVEN_HOME`（winget 无 Maven 包） |
 | **MySQL Community** | `Oracle.MySQL` | 支持非 PATH 检测 (Program Files 回退) |
-| **Redis** | `tporadowski.Redis` | 本地缓存（Windows 版） |
-| **DBeaver Community** | `DBeaver.DBeaverCommunity` | 数据库图形化管理 |
+| **Redis** | `Redis.Redis` | 本地缓存（Redis on Windows 官方） |
+| **DBeaver Community** | `DBeaver.DBeaver.Community` | 数据库图形化管理 |
 
 ### 🖥️ 前端 / Web（全家桶：Node.js + VS Code）
 
@@ -45,7 +45,7 @@
 
 | 工具 | winget Package ID | 备注 |
 |------|-------------------|------|
-| **C/C++ (GCC/G++)** | `niXman.mingw-w64` (优先) / `MSYS2.MSYS2` (回退) | MinGW-w64 + pacman 编译链 |
+| **C/C++ (GCC/G++)** | `MSYS2.MSYS2` | MSYS2 + pacman 装 MinGW-w64 编译链（winget 无 niXman.mingw-w64 包） |
 | **CMake** | `Kitware.CMake` | 构建工具（随 C/C++ 一起装） |
 
 ### 🤖 移动开发
@@ -122,6 +122,25 @@
 
 ---
 
+## 新增功能 (v1.6)
+
+### 🎯 版本选择（JDK / Python / Node.js）
+- 安装 JDK 时可选择 **JDK 8 / 11 / 17 / 21 (LTS)**，Python 可选 **3.11 / 3.12 / 3.13**，Node.js 可选 **20 / 22 (LTS)**
+- 安装前弹出版本菜单，直接回车用推荐版本（第 1 项）
+- `JAVA_HOME` 自动指向最新已装 JDK
+
+### 🛡️ 安装可靠性（PackageId 全部实测验证）
+- 所有 winget PackageId 已用 `winget show` 实测确认存在（修正了 Redis/DBeaver/MinGW 的错误 id）
+- 安装失败时按退出码给出可行动提示：已安装 / 需提权 / 源不可达 / 包不存在等
+- 失败后提示重试命令 `winget install --id <PackageId>` 或官网手动下载
+
+### 📊 下载进度条（自动换单位 + 显示总大小）
+- 自定义流式下载：实时进度显示 **已下载 / 共 XX MB (xx%)** 与 **下载速度**
+- 大小**自动换单位**（B → KB → MB → GB），不刷屏（PowerShell 原生进度条）
+- 已应用到：Android SDK 镜像下载、Maven 官方源下载、winget 自动安装
+
+---
+
 ## 新增功能 (v1.4)
 
 ### 🤖 Android Studio + SDK 34+
@@ -143,7 +162,7 @@
 ## 新增功能 (v1.3)
 
 ### 🏗️ Apache Maven
-- 通过 `Apache.Maven` winget 包安装
+- 从 Apache 官方源 `dlcdn.apache.org` 自动获取最新 3.x 版本并下载 zip（winget 无 Maven 包，已实测）
 - 自动检测 `mvn` 命令并显示版本
 - 自动搜索安装目录并配置 `MAVEN_HOME` 环境变量
 
@@ -164,8 +183,8 @@
 
 ### 🐛 Bug 修复 (v1.3)
 - **P0-1**: 菜单 `ContainsKey()` → `Contains()` (PSCustomObject 方法名修正)
-- **P0-2**: Maven PackageId `Apache.Maven.3` → `Apache.Maven`
-- **P0-3**: MinGW PackageId `WinLibs.GCC` → `niXman.mingw-w64`
+- **P0-2**: Maven 无 winget 包 → 改为 Apache 官方源 `dlcdn.apache.org` 下载
+- **P0-3**: MinGW PackageId `niXman.mingw-w64`（winget 实测不存在）→ 统一用 `MSYS2.MSYS2` + pacman
 - **P0-4**: MSYS2 安装后追加 `pacman -S mingw-w64-ucrt64-gcc` 编译链
 - **P0-5**: MySQL 检测从仅 PATH 扩展为多路径回退
 - **P1**: 摘要显示 `已处理 n/9 项` (含分母) + MySQL 版本正则提取 + 菜单列对齐
@@ -270,7 +289,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | 2 | `clang --version` | 检测 Clang/LLVM |
 | 3 | `vswhere.exe` + 安装目录扫描 | 检测 Visual Studio MSVC (cl.exe 不在系统 PATH 中) |
 
-若三种编译器均已存在，脚本会提示跳过。若均不存在，则自动安装 MinGW-w64 (多 ID 回退: niXman.mingw-w64 优先 → MSYS2 + pacman 回退).
+若三种编译器均已存在，脚本会提示跳过。若均不存在，则自动安装 MinGW-w64（`MSYS2.MSYS2` + pacman 安装 mingw-w64-ucrt64-gcc 编译链）。
 
 ---
 
