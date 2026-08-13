@@ -113,7 +113,14 @@ $tools = @(
     @{Name="Maven";    Install="Apache.Maven";                  Summary="mvn --version"},
     @{Name="MySQL";    Install="Oracle.MySQL";                  Summary="mysql --version"},
     @{Name="Android Studio"; Install="Google.AndroidStudio";     Summary="android-studio"},
-    @{Name="Android SDK";    Install="";                        Summary="android-34"}
+    @{Name="Android SDK";    Install="";                        Summary="android-34"},
+    @{Name="7-Zip";     Install="7zip.7zip";                 Summary="7z --help"},
+    @{Name="WinTerminal"; Install="Microsoft.WindowsTerminal"; Summary="wt --version"},
+    @{Name="PowerToys"; Install="Microsoft.PowerToys";       Summary="PowerToys"},
+    @{Name="Redis";     Install="tporadowski.Redis";         Summary="redis-cli --version"},
+    @{Name="Miniconda"; Install="Anaconda.Miniconda3";       Summary="conda --version"},
+    @{Name="kubectl";   Install="Kubernetes.kubectl";        Summary="kubectl version"},
+    @{Name="DBeaver";   Install="DBeaver.DBeaverCommunity";  Summary="dbeaver --version"}
 )
 
 foreach ($t in $tools) {

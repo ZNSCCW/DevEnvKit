@@ -4,31 +4,86 @@
 
 ---
 
-## 支持的工具
+## 支持的工具（按开发方向分组）
 
-| 类别 | 工具 | winget Package ID | 备注 |
-|------|------|-------------------|------|
-| 版本控制 | **Git** | `Git.Git` | 最新稳定版 |
-| 编程语言 | **Python 3.12** | `Python.Python.3.12` | 自动安装 pip |
-| 编程语言 | **Java JDK 21 LTS** | `EclipseAdoptium.Temurin.21.JDK` | 自动配置 `JAVA_HOME` |
-| 编程语言 | **C/C++ (GCC/G++)** | `niXman.mingw-w64` (优先) / `MSYS2.MSYS2` (回退) | MinGW-w64 + pacman 编译链，替代: MSVC / Clang |
-| 构建工具 | **CMake** | `Kitware.CMake` | 最新版 |
-| 构建工具 | **Apache Maven** | `Apache.Maven` | 自动配置 `MAVEN_HOME` |
-| 运行时 | **Node.js LTS** | `OpenJS.NodeJS.LTS` | 自动安装 npm |
-| 容器 | **Docker Desktop** | `Docker.DockerDesktop` | 需要系统重启 |
-| 数据库 | **MySQL Community** | `Oracle.MySQL` | 支持非 PATH 检测 (Program Files 回退) |
-| 编辑器 | **Visual Studio Code** | `Microsoft.VisualStudioCode` | 最新稳定版 |
-| IDE | **Android Studio + SDK 34+** | `Google.AndroidStudio` | 国内镜像下载 SDK 组件 (platform-tools + build-tools 34 + platform 34) |
+> 共 18 个工具，菜单已按以下分组展示；除"一键安装全部"外，每个方向还有"全家桶"批量安装项。
+
+### 🧩 基础必备
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Git** | `Git.Git` | 版本控制，最新稳定版 |
+| **7-Zip** | `7zip.7zip` | 解压工具 |
+| **Windows Terminal** | `Microsoft.WindowsTerminal` | 现代终端 |
+| **PowerToys** | `Microsoft.PowerToys` | Windows 效率工具集 |
+| **Visual Studio Code** | `Microsoft.VisualStudioCode` | 通用编辑器 |
+
+### ☕ Java 后端（全家桶：JDK + Maven + MySQL + Redis + DBeaver）
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Java JDK 21 LTS** | `EclipseAdoptium.Temurin.21.JDK` | 自动配置 `JAVA_HOME` |
+| **Apache Maven** | `Apache.Maven` | 自动配置 `MAVEN_HOME` |
+| **MySQL Community** | `Oracle.MySQL` | 支持非 PATH 检测 (Program Files 回退) |
+| **Redis** | `tporadowski.Redis` | 本地缓存（Windows 版） |
+| **DBeaver Community** | `DBeaver.DBeaverCommunity` | 数据库图形化管理 |
+
+### 🖥️ 前端 / Web（全家桶：Node.js + VS Code）
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Node.js LTS** | `OpenJS.NodeJS.LTS` | 自动安装 npm |
+
+### 🐍 Python（全家桶：Python + Miniconda）
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Python 3.12** | `Python.Python.3.12` | 自动安装 pip |
+| **Miniconda3** | `Anaconda.Miniconda3` | 数据科学/环境管理 |
+
+### ⚙️ C/C++
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **C/C++ (GCC/G++)** | `niXman.mingw-w64` (优先) / `MSYS2.MSYS2` (回退) | MinGW-w64 + pacman 编译链 |
+| **CMake** | `Kitware.CMake` | 构建工具（随 C/C++ 一起装） |
+
+### 🤖 移动开发
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Android Studio + SDK 34+** | `Google.AndroidStudio` | 国内镜像下载 SDK 组件 |
+
+### 🐳 容器 / 运维（全家桶：Docker + kubectl）
+
+| 工具 | winget Package ID | 备注 |
+|------|-------------------|------|
+| **Docker Desktop** | `Docker.DockerDesktop` | 需要系统重启 |
+| **kubectl** | `Kubernetes.kubectl` | Kubernetes CLI |
+
+### 📋 速查：我想做 X → 装哪些？
+
+| 目标 | 一键选择 |
+|------|----------|
+| **新机基础环境** | 菜单 `1` 一键全部（或基础必备组） |
+| **Java 后端开发** | 菜单 `12` ☕ Java 后端全家桶 |
+| **前端 / Web 开发** | 菜单 `14` 🖥️ 前端全家桶 |
+| **Python / 数据科学** | 菜单 `17` 🐍 Python 全家桶 |
+| **C/C++ / 底层开发** | 菜单 `18` |
+| **Android 开发** | 菜单 `19` |
+| **容器 / Kubernetes** | 菜单 `22` 🐳 容器/运维全家桶 |
+| **只查环境状态** | 菜单 `23` 📋 环境摘要 |
 
 ---
 
 ## 特性
 
 ### ✅ 核心功能
-- 🚀 **一键安装全部** — 菜单选项 `[1]`，10 个工具全自动部署 (国内网络下 Android SDK 走腾讯云镜像)
-- 🎯 **选择性安装** — 菜单选项 `[2]~[11]`，单独安装某个工具
+- 🚀 **一键安装全部** — 菜单选项 `[1]`，18 个工具全自动部署 (国内网络下 Android SDK 走腾讯云镜像)
+- 🎯 **选择性安装** — 菜单选项 `[2]~[22]`，单独安装某个工具
+- 🧩 **按方向全家桶** — 菜单选项 `[12]/[14]/[17]/[22]`，按开发方向批量安装（Java 后端/前端/Python/容器运维）
 - 🔄 **智能版本检测** — 已安装工具显示当前版本，Y=升级覆盖 / N=跳过保留
-- 📋 **环境摘要** — 菜单选项 `[12]`，检测 16 项组件安装状态
+- 📋 **环境摘要** — 菜单选项 `[23]`，检测 23 项组件安装状态
 
 ### ✅ 安全设计 (v1.4 审计通过)
 - **零命令注入** — 全脚本使用 ScriptBlock `{}` + `&` 调用操作符，无 `Invoke-Expression`
@@ -140,18 +195,29 @@ dev_env_setup/
 2. 在菜单界面选择操作:
 
 ```
+  ── 🧩 基础必备 ──
   [1]  🚀 一键安装全部 (推荐)
-  [2]  🔧 仅安装 Git
-  [3]  🐍 仅安装 Python
-  [4]  ☕ 仅安装 Java (JDK)
-  [5]  ⚙️ 仅安装 C/C++ 开发工具 (MinGW + CMake)
-  [6]  🟢 仅安装 Node.js
-  [7]  🐳 仅安装 Docker
-  [8]  📝 仅安装 VS Code
-  [9]  🏗️ 仅安装 Maven
-  [10] 🗄️ 仅安装 MySQL
-  [11] 🤖 仅安装 Android Studio + SDK 34+
-  [12] 📋 查看当前环境摘要
+  [2]  🔧 Git          [3]  🗜️ 7-Zip
+  [4]  🪟 Windows Terminal   [5]  ⚡ PowerToys
+  [6]  📝 VS Code
+  ── ☕ Java 后端 ──
+  [7]  ☕ Java (JDK)   [8]  🏗️ Maven
+  [9]  🗄️ MySQL        [10] 🔴 Redis
+  [11] 🗄️ DBeaver      [12] ☕ Java 后端全家桶
+  ── 🖥️ 前端 / Web ──
+  [13] 🟢 Node.js      [14] 🖥️ 前端全家桶
+  ── 🐍 Python ──
+  [15] 🐍 Python       [16] 🐍 Miniconda
+  [17] 🐍 Python 全家桶
+  ── ⚙️ C/C++ ──
+  [18] ⚙️ C/C++ (MinGW + CMake)
+  ── 🤖 移动开发 ──
+  [19] 🤖 Android Studio + SDK 34+
+  ── 🐳 容器 / 运维 ──
+  [20] 🐳 Docker       [21] ☸️ kubectl
+  [22] 🐳 容器/运维全家桶
+  ── 📋 系统 ──
+  [23] 📋 查看当前环境摘要
   [0]  👋 退出
 ```
 
@@ -189,7 +255,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 4. 通过 `Invoke-Installer` 统一刷新 `PATH` (`Update-Path`)
 
 安装完成后:
-- 展示 **16 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code/Android Studio/Android SDK)
+- 展示 **23 项环境检测摘要** (Git/Python/pip/Java/javac/Maven/GCC/G++/Node.js/npm/Docker/MySQL/CMake/VS Code/Android Studio/Android SDK/7-Zip/WinTerminal/PowerToys/Redis/Miniconda/kubectl/DBeaver)
 - 询问是否**立即重启** (Docker Desktop 需要重启生效，会先提示保存工作)
 
 ---

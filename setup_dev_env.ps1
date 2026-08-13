@@ -379,6 +379,53 @@ function Install-VSCode {
         -DisplayName "Visual Studio Code" -TargetDesc "VS Code (最新稳定版)" -VersionCmd { code --version }
 }
 
+# ===== 基础工具扩展 (v1.5) =====
+function Install-7Zip {
+    return Invoke-Installer -ToolName "🗜️ 7-Zip" -ExeName "7z" -PackageId "7zip.7zip" `
+        -DisplayName "7-Zip" -TargetDesc "7-Zip (最新稳定版)" -VersionCmd { 7z --help 2>&1 | Select-Object -First 1 } -VerReplace '7-Zip '
+}
+
+function Install-WinTerminal {
+    return Invoke-Installer -ToolName "🪟 Windows Terminal" -ExeName "wt" -PackageId "Microsoft.WindowsTerminal" `
+        -DisplayName "Windows Terminal" -TargetDesc "Windows Terminal (最新稳定版)" -VersionCmd { wt --version 2>&1 } -VerReplace 'Windows Terminal Version '
+}
+
+function Install-PowerToys {
+    Write-Host "`n  ── ⚡ PowerToys ─────────────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── PowerToys ──"
+    # PowerToys 无命令行工具，用 exe 路径检测（"以管理员身份运行"时 Program Files 可写）
+    $ptExe = Join-Path ${env:ProgramFiles} "PowerToys\PowerToys.exe"
+    if (Test-Path $ptExe) {
+        $ver = (Get-Item $ptExe).VersionInfo.ProductVersion
+        if (-not (Request-Confirmation -ToolName "PowerToys" -InstalledVersion $ver -TargetDesc "PowerToys (最新稳定版)")) {
+            $script:completedSteps++; return $false
+        }
+    }
+    $r = Invoke-WingetInstall -PackageId "Microsoft.PowerToys" -DisplayName "PowerToys"
+    Update-Path
+    return $r
+}
+
+function Install-Redis {
+    return Invoke-Installer -ToolName "🔴 Redis" -ExeName "redis-cli" -PackageId "tporadowski.Redis" `
+        -DisplayName "Redis for Windows" -TargetDesc "Redis for Windows (tporadowski)" -VersionCmd { redis-cli --version 2>&1 }
+}
+
+function Install-Miniconda {
+    return Invoke-Installer -ToolName "🐍 Miniconda" -ExeName "conda" -PackageId "Anaconda.Miniconda3" `
+        -DisplayName "Miniconda3" -TargetDesc "Miniconda3 (Python 数据科学环境)" -VersionCmd { conda --version 2>&1 }
+}
+
+function Install-Kubectl {
+    return Invoke-Installer -ToolName "☸️ kubectl" -ExeName "kubectl" -PackageId "Kubernetes.kubectl" `
+        -DisplayName "kubectl" -TargetDesc "Kubernetes CLI (最新稳定版)" -VersionCmd { kubectl version --client 2>&1 | Select-Object -First 1 }
+}
+
+function Install-DBeaver {
+    return Invoke-Installer -ToolName "🗄️ DBeaver" -ExeName "dbeaver" -PackageId "DBeaver.DBeaverCommunity" `
+        -DisplayName "DBeaver Community" -TargetDesc "DBeaver (数据库图形化管理工具)" -VersionCmd { dbeaver --version 2>&1 }
+}
+
 function Install-Maven {
     Write-Host "`n  ── 🏗️  Maven ─────────────────────────────────────────────" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── Maven ──"
@@ -749,14 +796,21 @@ function Install-All {
     $startTime = Get-Date
     $funcs = @(
         @{Name="Git";     F={ Install-Git }},
+        @{Name="7-Zip";   F={ Install-7Zip }},
         @{Name="Python";  F={ Install-Python }},
         @{Name="Java";    F={ Install-Java }},
         @{Name="C/C++";   F={ Install-CPP }},
         @{Name="Node.js"; F={ Install-NodeJS }},
-        @{Name="Docker";  F={ Install-Docker }},
-        @{Name="VS Code"; F={ Install-VSCode }},
         @{Name="Maven";   F={ Install-Maven }},
         @{Name="MySQL";   F={ Install-MySQL }},
+        @{Name="Redis";   F={ Install-Redis }},
+        @{Name="DBeaver"; F={ Install-DBeaver }},
+        @{Name="Docker";  F={ Install-Docker }},
+        @{Name="kubectl"; F={ Install-Kubectl }},
+        @{Name="Miniconda"; F={ Install-Miniconda }},
+        @{Name="VS Code"; F={ Install-VSCode }},
+        @{Name="WinTerminal"; F={ Install-WinTerminal }},
+        @{Name="PowerToys"; F={ Install-PowerToys }},
         @{Name="Android"; F={ Install-Android }}
     )
     foreach ($fn in $funcs) {
@@ -776,6 +830,50 @@ function Install-All {
     Write-AppendLog "  ╚══════════════════════════════════════════════╝"
     Show-Summary
     Invoke-Reboot
+}
+
+# ========================== 按开发方向安装 ==========================
+# 复用现有 Install-* 函数，按方向批量安装（try/catch 独立容错，与 Install-All 一致）
+function Install-JavaStack {
+    Write-Host "`n  ☕ 开始安装 Java 后端全家桶 (JDK + Maven + MySQL + Redis + DBeaver) ..." -ForegroundColor $ColorStep
+    Write-AppendLog "`n  ☕ Java 后端全家桶开始"
+    foreach ($t in @(
+        @{Name="Java JDK"; F={ Install-Java }}, @{Name="Maven"; F={ Install-Maven }},
+        @{Name="MySQL"; F={ Install-MySQL }}, @{Name="Redis"; F={ Install-Redis }},
+        @{Name="DBeaver"; F={ Install-DBeaver }})) {
+        try { & $t.F } catch { Write-Fail "安装 $($t.Name) 失败: $_" }
+    }
+    Write-OK "Java 后端全家桶处理完成" -NoCount
+}
+
+function Install-WebStack {
+    Write-Host "`n  🖥️ 开始安装前端全家桶 (Node.js + VS Code) ..." -ForegroundColor $ColorStep
+    Write-AppendLog "`n  🖥️ 前端全家桶开始"
+    foreach ($t in @(
+        @{Name="Node.js"; F={ Install-NodeJS }}, @{Name="VS Code"; F={ Install-VSCode }})) {
+        try { & $t.F } catch { Write-Fail "安装 $($t.Name) 失败: $_" }
+    }
+    Write-OK "前端全家桶处理完成" -NoCount
+}
+
+function Install-PythonStack {
+    Write-Host "`n  🐍 开始安装 Python 全家桶 (Python + Miniconda) ..." -ForegroundColor $ColorStep
+    Write-AppendLog "`n  🐍 Python 全家桶开始"
+    foreach ($t in @(
+        @{Name="Python"; F={ Install-Python }}, @{Name="Miniconda"; F={ Install-Miniconda }})) {
+        try { & $t.F } catch { Write-Fail "安装 $($t.Name) 失败: $_" }
+    }
+    Write-OK "Python 全家桶处理完成" -NoCount
+}
+
+function Install-DevOpsStack {
+    Write-Host "`n  🐳 开始安装容器/运维全家桶 (Docker + kubectl) ..." -ForegroundColor $ColorStep
+    Write-AppendLog "`n  🐳 容器/运维全家桶开始"
+    foreach ($t in @(
+        @{Name="Docker"; F={ Install-Docker }}, @{Name="kubectl"; F={ Install-Kubectl }})) {
+        try { & $t.F } catch { Write-Fail "安装 $($t.Name) 失败: $_" }
+    }
+    Write-OK "容器/运维全家桶处理完成" -NoCount
 }
 
 # ========================== 显示摘要 ==========================
@@ -816,7 +914,17 @@ function Show-Summary {
                                     Sort-Object { [int]$_ } -Descending)
                     if ($apiLevels) { "API $($apiLevels[0])+ ($sdk)" } else { "已安装" }
                 } else { throw [System.Management.Automation.CommandNotFoundException]::new("android-34") }
-            }}
+            }},
+        @{L="7-Zip";    C={ 7z --help 2>&1 | Select-Object -First 1 }},
+        @{L="WinTerm";  C={ wt --version 2>&1 }},
+        @{L="PowerToys"; C={
+                $p = Join-Path ${env:ProgramFiles} "PowerToys\PowerToys.exe"
+                if (Test-Path $p) { (Get-Item $p).VersionInfo.ProductVersion } else { throw [System.Management.Automation.CommandNotFoundException]::new("PowerToys") }
+            }},
+        @{L="Redis";    C={ redis-cli --version 2>&1 }},
+        @{L="Miniconda"; C={ conda --version 2>&1 }},
+        @{L="kubectl";  C={ kubectl version --client 2>&1 | Select-Object -First 1 }},
+        @{L="DBeaver";  C={ dbeaver --version 2>&1 }}
     )
     foreach ($t in $tools) {
         try { $v = & $t.C 2>&1 | Select-Object -First 1; Write-Host "  ✅ $($t.L.PadRight(10)) : $v" -ForegroundColor $ColorSuccess; Write-AppendLog "  ✅ $($t.L.PadRight(10)) : $v" }
@@ -863,27 +971,56 @@ function Wait-Key {
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
-# ========================== 主菜单 ==========================
+# ========================== 主菜单（按开发方向分组） ==========================
 $menu = [ordered]@{
     '1'  = @{Label="🚀 一键安装全部 (推荐)"; Action={ Install-All }}
     '2'  = @{Label="🔧 仅安装 Git"; Action={ $null = Install-Git }}
-    '3'  = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
-    '4'  = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
-    '5'  = @{Label="⚙️ 仅安装 C/C++ 开发工具 (MinGW + CMake)"; Action={ $null = Install-CPP }}
-    '6'  = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
-    '7'  = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
-    '8'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
-    '9'  = @{Label="🏗️ 仅安装 Maven"; Action={ $null = Install-Maven }}
-    '10' = @{Label="🗄️ 仅安装 MySQL"; Action={ $null = Install-MySQL }}
-    '11' = @{Label="🤖 仅安装 Android Studio + SDK 34+"; Action={ $null = Install-Android }}
-    '12' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+    '3'  = @{Label="🗜️ 仅安装 7-Zip"; Action={ $null = Install-7Zip }}
+    '4'  = @{Label="🪟 仅安装 Windows Terminal"; Action={ $null = Install-WinTerminal }}
+    '5'  = @{Label="⚡ 仅安装 PowerToys"; Action={ $null = Install-PowerToys }}
+    '6'  = @{Label="📝 仅安装 VS Code"; Action={ $null = Install-VSCode }}
+    '7'  = @{Label="☕ 仅安装 Java (JDK)"; Action={ $null = Install-Java }}
+    '8'  = @{Label="🏗️ 仅安装 Maven"; Action={ $null = Install-Maven }}
+    '9'  = @{Label="🗄️ 仅安装 MySQL"; Action={ $null = Install-MySQL }}
+    '10' = @{Label="🔴 仅安装 Redis"; Action={ $null = Install-Redis }}
+    '11' = @{Label="🗄️ 仅安装 DBeaver"; Action={ $null = Install-DBeaver }}
+    '12' = @{Label="☕ Java 后端全家桶 (7-11)"; Action={ Install-JavaStack }}
+    '13' = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
+    '14' = @{Label="🖥️ 前端全家桶 (Node.js + VS Code)"; Action={ Install-WebStack }}
+    '15' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
+    '16' = @{Label="🐍 仅安装 Miniconda"; Action={ $null = Install-Miniconda }}
+    '17' = @{Label="🐍 Python 全家桶 (15-16)"; Action={ Install-PythonStack }}
+    '18' = @{Label="⚙️ 仅安装 C/C++ (MinGW + CMake)"; Action={ $null = Install-CPP }}
+    '19' = @{Label="🤖 仅安装 Android Studio + SDK 34+"; Action={ $null = Install-Android }}
+    '20' = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
+    '21' = @{Label="☸️ 仅安装 kubectl"; Action={ $null = Install-Kubectl }}
+    '22' = @{Label="🐳 容器/运维全家桶 (20-21)"; Action={ Install-DevOpsStack }}
+    '23' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+}
+
+# 菜单分组定义（组标题 → 菜单编号）
+$menuGroups = [ordered]@{
+    "🧩 基础必备"    = @('1','2','3','4','5','6')
+    "☕ Java 后端"   = @('7','8','9','10','11','12')
+    "🖥️ 前端 / Web" = @('13','14')
+    "🐍 Python"      = @('15','16','17')
+    "⚙️ C/C++"      = @('18')
+    "🤖 移动开发"    = @('19')
+    "🐳 容器 / 运维" = @('20','21','22')
+    "📋 系统"        = @('23')
 }
 
 function Show-Menu {
     Write-Title
-    Write-Host "  请选择要执行的操作:" -ForegroundColor $ColorInfo
+    Write-Host "  请选择要执行的操作 (按开发方向分组):" -ForegroundColor $ColorInfo
     Write-Host ""
-    foreach ($k in $menu.Keys) { Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu }) }
+    foreach ($g in $menuGroups.GetEnumerator()) {
+        Write-Host "  ── $($g.Key) ──────────────────────────────" -ForegroundColor $ColorTitle
+        foreach ($k in $g.Value) {
+            Write-Host "    [$k]  $($menu[$k].Label)" -ForegroundColor $(if ($k -eq '1') { "Green" } else { $ColorMenu })
+        }
+        Write-Host ""
+    }
     Write-Host "    [0]  👋 退出" -ForegroundColor $ColorMenu
     Write-Host "`n  ───────────────────────────────────────────────────────────" -ForegroundColor $ColorTitle
 Write-Host "  请输入选项 [0-$($menu.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
@@ -906,8 +1043,8 @@ do {
     elseif ($menu.Contains($choice)) {
         Write-AppendLog "  📌 用户选择: [$choice]"
         & $menu[$choice].Action
-        # 选项 12 (Show-Summary) 不产生安装日志，跳过保存
-        if ($choice -ne '12') { Save-Log }
+        # 选项 23 (Show-Summary) 不产生安装日志，跳过保存
+        if ($choice -ne '23') { Save-Log }
         Wait-Key
     }
     else {
