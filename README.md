@@ -139,6 +139,15 @@
 - 大小**自动换单位**（B → KB → MB → GB），不刷屏（PowerShell 原生进度条）
 - 已应用到：Android SDK 镜像下载、Maven 官方源下载、winget 自动安装
 
+### 🐢 下载缓慢应对（国内网络友好）
+- **停滞检测**：下载 15 秒无数据判定卡死，自动中断（避免无限挂起）
+- **自动重试**：下载失败自动重试 2 次（间隔 3 秒），失败清理半成品文件
+- **多镜像回退**：
+  - Android SDK：腾讯云镜像 `mirrors.cloud.tencent.com`（国内直连）
+  - Maven：Apache 官方源 `dlcdn.apache.org` → 阿里云镜像 `mirrors.aliyun.com` 自动回退
+  - winget 安装包：GitHub Release 失败时打开下载页面人工处理
+- 慢速网络下总超时放宽到 10 分钟，靠停滞检测而非固定超时兜底
+
 ---
 
 ## 新增功能 (v1.4)

@@ -115,45 +115,62 @@ function Format-Size {
 
 # 流式下载 + 实时进度条：自动换单位、显示总大小与百分比、显示速度
 # 用 Write-Progress 原生进度条（不刷屏），替代 Invoke-WebRequest 的逐行进度
+# 增强：① 停滞检测（15s 无数据视为卡死中断）；② 失败自动重试（默认 2 次）；③ 失败删除半成品
 function Download-WithProgress {
     param(
         [string]$Uri,
         [string]$OutFile,
-        [string]$Activity = "下载中"
+        [string]$Activity = "下载中",
+        [int]$Retries = 2,
+        [int]$StallSeconds = 15
     )
-    try {
-        $client = [System.Net.Http.HttpClient]::new()
-        $client.Timeout = [TimeSpan]::FromSeconds(300)
-        $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-        $response.EnsureSuccessStatusCode()
-        $totalBytes = $response.Content.Headers.ContentLength  # 服务器可能不返回，为 null
-        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-        $fs = [System.IO.File]::Create($OutFile)
-        $buffer = New-Object byte[] 81920
-        $read = 0; $downloaded = 0L
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $name = $Uri.Split('/')[-1]
-        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $fs.Write($buffer, 0, $read)
-            $downloaded += $read
-            $pct = -1
-            if ($totalBytes -gt 0) { $pct = [math]::Min(100, [math]::Round($downloaded * 100.0 / $totalBytes, 1)) }
-            $status = "已下载 $(Format-Size $downloaded)"
-            if ($totalBytes -gt 0) { $status += " / 共 $(Format-Size $totalBytes) ($pct%)" }
-            $speed = $downloaded / [math]::Max(1, $sw.Elapsed.TotalSeconds)
-            $status += "   速度 $(Format-Size $speed)/s"
-            Write-Progress -Activity "$Activity ($name)" -Status $status -PercentComplete $(if ($pct -ge 0) { $pct } else { -1 })
+    for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+        try {
+            $client = [System.Net.Http.HttpClient]::new()
+            $client.Timeout = [TimeSpan]::FromMinutes(10)  # 总超时放宽，靠停滞检测兜底慢速网络
+            $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            $response.EnsureSuccessStatusCode()
+            $totalBytes = $response.Content.Headers.ContentLength  # 服务器可能不返回，为 null
+            $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+            $fs = [System.IO.File]::Create($OutFile)
+            $buffer = New-Object byte[] 81920
+            $read = 0; $downloaded = 0L
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $lastProgress = [DateTime]::Now
+            $lastDownloaded = 0L
+            $name = $Uri.Split('/')[-1]
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $fs.Write($buffer, 0, $read)
+                $downloaded += $read
+                # 停滞检测：一段时间无字节增长说明网络卡死，中断避免无限等待
+                if ($downloaded -gt $lastDownloaded) { $lastDownloaded = $downloaded; $lastProgress = [DateTime]::Now }
+                elseif (([DateTime]::Now - $lastProgress).TotalSeconds -gt $StallSeconds) {
+                    throw "下载停滞超过 $StallSeconds 秒（无数据，疑似网络卡死）"
+                }
+                $pct = -1
+                if ($totalBytes -gt 0) { $pct = [math]::Min(100, [math]::Round($downloaded * 100.0 / $totalBytes, 1)) }
+                $status = "已下载 $(Format-Size $downloaded)"
+                if ($totalBytes -gt 0) { $status += " / 共 $(Format-Size $totalBytes) ($pct%)" }
+                $speed = $downloaded / [math]::Max(1, $sw.Elapsed.TotalSeconds)
+                $status += "   速度 $(Format-Size $speed)/s"
+                Write-Progress -Activity "$Activity ($name)" -Status $status -PercentComplete $(if ($pct -ge 0) { $pct } else { -1 })
+            }
+            $sw.Stop()
+            $fs.Close(); $stream.Dispose(); $response.Dispose(); $client.Dispose()
+            Write-Progress -Activity "$Activity" -Completed
+            return $true
+        } catch {
+            Write-Progress -Activity "$Activity" -Completed
+            if (Test-Path $OutFile) { Remove-Item $OutFile -Force -ErrorAction SilentlyContinue }  # 清理半成品
+            if ($attempt -lt $Retries) {
+                Write-Warn "下载失败 (第 $($attempt + 1)/$($Retries + 1) 次): $($_.Exception.Message)，3 秒后重试..."
+                Start-Sleep -Seconds 3
+            } else {
+                Write-Warn "下载失败: $($_.Exception.Message)"
+            }
         }
-        $sw.Stop()
-        $fs.Close(); $stream.Dispose(); $response.Dispose(); $client.Dispose()
-        Write-Progress -Activity "$Activity" -Completed
-        return $true
-    } catch {
-        Write-Progress -Activity "$Activity" -Completed
-        Write-Warn "下载失败: $_"
-        if (Test-Path $OutFile) { Remove-Item $OutFile -Force -ErrorAction SilentlyContinue }
-        return $false
     }
+    return $false
 }
 
 # winget 常见退出码说明（安装失败时给出可行动提示）
@@ -576,18 +593,24 @@ function Install-Maven {
     
     Write-Step "正在安装 Apache Maven (从 Apache 官方源下载)..."
     
-    # 获取最新稳定版 Maven 3.x 版本号
+    # 获取最新稳定版 Maven 3.x 版本号（官方源 → 阿里云镜像回退）
     $mavenVersion = $null
-    try {
-        Write-Info "正在获取最新 Maven 版本信息..."
-        $mirrorResponse = Invoke-WebRequest -Uri "https://dlcdn.apache.org/maven/maven-3/" -TimeoutSec 15 -ErrorAction Stop
-        $versionMatches = [regex]::Matches($mirrorResponse.Content, 'href="(\d+\.\d+\.\d+)/"')
-        if ($versionMatches.Count -gt 0) {
-            $latestVersion = ($versionMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object { [Version]$_ } -Descending | Select-Object -First 1)
-            if ($latestVersion) { $mavenVersion = $latestVersion }
+    $mavenListUrls = @(
+        "https://dlcdn.apache.org/maven/maven-3/",
+        "https://mirrors.aliyun.com/apache/maven/maven-3/"
+    )
+    foreach ($listUrl in $mavenListUrls) {
+        try {
+            Write-Info "正在获取最新 Maven 版本信息 ($($listUrl.Split('/')[2]))..."
+            $mirrorResponse = Invoke-WebRequest -Uri $listUrl -TimeoutSec 15 -ErrorAction Stop
+            $versionMatches = [regex]::Matches($mirrorResponse.Content, 'href="(\d+\.\d+\.\d+)/"')
+            if ($versionMatches.Count -gt 0) {
+                $latestVersion = ($versionMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object { [Version]$_ } -Descending | Select-Object -First 1)
+                if ($latestVersion) { $mavenVersion = $latestVersion; break }
+            }
+        } catch {
+            Write-Warn "获取失败 ($($listUrl.Split('/')[2])): $_"
         }
-    } catch {
-        Write-Warn "无法获取最新版本信息: $_"
     }
     
     # 回退到已知的稳定版本
@@ -598,8 +621,11 @@ function Install-Maven {
     
     Write-Info "目标版本: Apache Maven $mavenVersion"
     
-    # 下载 Maven 二进制包
-    $mavenZipUrl = "https://dlcdn.apache.org/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip"
+    # 下载 Maven 二进制包（官方源 → 阿里云镜像回退，各自带重试）
+    $mavenZipUrls = @(
+        "https://dlcdn.apache.org/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip",
+        "https://mirrors.aliyun.com/apache/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip"
+    )
     $tempZip = Join-Path $env:TEMP "apache-maven-$mavenVersion-bin.zip"
     $installBase = "C:\Program Files\Apache\Maven"
     $mavenHome = Join-Path $installBase "apache-maven-$mavenVersion"
@@ -610,11 +636,17 @@ function Install-Maven {
             New-Item -ItemType Directory -Path $installBase -Force | Out-Null
         }
         
-        # 下载
+        # 下载（多源回退）
         Write-Info "正在下载 Apache Maven $mavenVersion ..."
-        if (-not (Download-WithProgress -Uri $mavenZipUrl -OutFile $tempZip -Activity "下载 Apache Maven $mavenVersion")) {
-            throw "Maven 下载失败"
+        $downloaded = $false
+        foreach ($zipUrl in $mavenZipUrls) {
+            Write-Info "下载源: $($zipUrl.Split('/')[2])"
+            if (Download-WithProgress -Uri $zipUrl -OutFile $tempZip -Activity "下载 Apache Maven $mavenVersion") {
+                $downloaded = $true; break
+            }
+            Write-Warn "该源下载失败，尝试下一个镜像..."
         }
+        if (-not $downloaded) { throw "Maven 所有下载源均失败" }
         
         if (-not (Test-Path $tempZip) -or (Get-Item $tempZip).Length -lt 1MB) {
             throw "下载文件不完整或为空"
