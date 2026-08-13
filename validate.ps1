@@ -61,7 +61,14 @@ $patternChecks = @(
     @{Name="安装日志保存"; Pass=($content -match 'Save-Log|install_log_')},
     @{Name="MSYS2 提供 MinGW-w64"; Pass=($content -match "MSYS2.MSYS2")},
     @{Name="MSYS2 PATH 手动追加"; Pass=($content -match "msys64\\\\mingw64\\\\bin" -or $content -match 'msys64\\mingw64\\bin')},
-    @{Name="编译器独立检测 ArrayList"; Pass=($content -match "ArrayList")}
+    @{Name="编译器独立检测 ArrayList"; Pass=($content -match "ArrayList")},
+    @{Name="版本选择 Select-Version"; Pass=($content -match "function Select-Version" -and $content -match "JDK 8|3.11|Node.js 20")},
+    @{Name="下载进度 Download-WithProgress"; Pass=($content -match "function Download-WithProgress" -and $content -match "Write-Progress")},
+    @{Name="大小格式化 Format-Size"; Pass=($content -match "function Format-Size" -and $content -match "1GB")},
+    @{Name="winget 退出码解释 Get-WingetExitHint"; Pass=($content -match "function Get-WingetExitHint" -and $content -match "0x8A150014")},
+    @{Name="Maven 阿里云镜像回退"; Pass=($content -match "mirrors\.aliyun\.com")},
+    @{Name="下载停滞检测"; Pass=($content -match "StallSeconds" -and $content -match "停滞")},
+    @{Name="下载自动重试"; Pass=($content -match "Retries" -and $content -match "重试")}
 )
 
 $allPatternsPass = $true
