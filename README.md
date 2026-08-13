@@ -122,6 +122,15 @@
 
 ---
 
+## 新增功能 (v1.5)
+
+### 🧩 工具扩展至 18 个，按开发方向分组
+- 新增 7 个工具：7-Zip / Windows Terminal / PowerToys / Redis / Miniconda / kubectl / DBeaver
+- 菜单按 **7 个开发方向分组**展示（基础必备 / Java 后端 / 前端 / Python / C-C++ / 移动 / 容器运维），见顶部工具表
+- 新增 **4 个"全家桶"一键安装**：Java 后端（12）、前端（14）、Python（17）、容器运维（22）——复用现有 Install-* 函数，`$funcs.Count` 动态计数
+
+---
+
 ## 新增功能 (v1.6)
 
 ### 🎯 版本选择（JDK / Python / Node.js）
@@ -149,6 +158,14 @@
   - Maven：Apache 官方源 `dlcdn.apache.org` → 阿里云镜像 `mirrors.aliyun.com` 自动回退
   - winget 安装包：GitHub Release 失败时打开下载页面人工处理
 - 慢速网络下总超时放宽到 10 分钟，靠停滞检测而非固定超时兜底
+
+### 🔬 实机验证（提取函数实测）
+- 用 AST 从脚本**提取函数**（不跑主流程）在 PowerShell 5.1 下实测下载，发现并修复 **3 个静态审查发现不了的运行时 bug**：
+  1. `System.Net.Http` 程序集 5.1 不自动加载 → `Add-Type` 显式加载
+  2. `RangeHeaderValue.From` 是 .NET Core API，5.1 的 .NET Framework 没有 → 改用构造器
+  3. PowerShell 方法返回值默认输出到管道，`EnsureSuccessStatusCode()` 污染函数返回 → `$null =`
+- 实测确认：完整下载 ✅、**断点续传**（4MB 半成品 → 续传后完整文件 9395475 字节分毫不差）✅、代理感知 ✅
+- **教训：bat 启动器默认 powershell.exe (PS 5.1)，与 pwsh 7 行为不同，跨版本 API 必须实测**
 
 ---
 
@@ -208,8 +225,8 @@
 ```
 dev_env_setup/
 ├── 启动配置工具.bat        # 主启动器 (双击即可, 推荐)
-├── setup_dev_env.ps1      # PowerShell 主脚本 (~600 行)
-├── validate.ps1           # 代码审查脚本 (35 项检查)
+├── setup_dev_env.ps1      # PowerShell 主脚本 (v1.6, ~1200 行)
+├── validate.ps1           # 静态审查脚本 (71 项检查)
 ├── logs/                  # 安装日志存放目录 (每次运行自动生成 *.txt)
 ├── LICENSE                # MIT 许可证
 └── README.md              # 本说明文件
