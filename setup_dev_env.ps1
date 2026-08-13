@@ -129,6 +129,8 @@ function Download-WithProgress {
     for ($attempt = 0; $attempt -le $Retries; $attempt++) {
         $client = $null; $response = $null; $stream = $null; $fs = $null
         try {
+            # Windows PowerShell 5.1 默认不加载 System.Net.Http，必须显式加载（bat 启动器用的是 5.1）
+            try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { }
             # 代理感知：环境变量优先（PowerShell $env: 不区分大小写，HTTPS_PROXY/https_proxy 均命中），未设置走系统代理
             $handler = [System.Net.Http.HttpClientHandler]::new()
             $proxyVar = $env:HTTPS_PROXY
@@ -152,7 +154,10 @@ function Download-WithProgress {
             if (Test-Path $OutFile) { $existing = (Get-Item $OutFile).Length }
             $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Uri)
             if ($existing -gt 0) {
-                $request.Headers.Range = [System.Net.Http.Headers.RangeHeaderValue]::From($existing, $null)
+                # .NET Framework(PS 5.1) 无 RangeHeaderValue.From 静态方法，用构造器兼容写法
+                $range = New-Object System.Net.Http.Headers.RangeHeaderValue
+                $range.Ranges.Add((New-Object System.Net.Http.Headers.RangeItemHeaderValue([long]$existing, $null)))
+                $request.Headers.Range = $range
             }
             $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
             if ($response.StatusCode -eq [System.Net.HttpStatusCode]::PartialContent) {
@@ -169,7 +174,7 @@ function Download-WithProgress {
                 Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
                 $downloaded = 0L
             }
-            $response.EnsureSuccessStatusCode()
+            $null = $response.EnsureSuccessStatusCode()  # 防止方法返回值泄漏到输出管道
 
             $totalBytes = $response.Content.Headers.ContentLength
             $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
