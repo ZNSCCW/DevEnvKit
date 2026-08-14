@@ -331,7 +331,7 @@ function Start-Gui {
 
     $script:installBtn = New-Object System.Windows.Forms.Button
     $script:installBtn.Text = "⬇ 安装所选"
-    $script:installBtn.Size = New-Object System.Drawing.Size(110, 32)
+    $script:installBtn.Size = New-Object System.Drawing.Size(95, 32)
     $script:installBtn.Location = New-Object System.Drawing.Point(0, 5)
     $script:installBtn.Add_Click({
         $selected = @($script:checkboxes | Where-Object { $_.Checked })
@@ -371,9 +371,9 @@ function Start-Gui {
     $bottom.Controls.Add($script:installBtn)
 
     $script:viewBtn = New-Object System.Windows.Forms.Button
-    $script:viewBtn.Text = "📍 查看安装位置"
-    $script:viewBtn.Size = New-Object System.Drawing.Size(120, 32)
-    $script:viewBtn.Location = New-Object System.Drawing.Point(120, 5)
+    $script:viewBtn.Text = "📍 位置"
+    $script:viewBtn.Size = New-Object System.Drawing.Size(95, 32)
+    $script:viewBtn.Location = New-Object System.Drawing.Point(100, 5)
     $script:viewBtn.Add_Click({
         if ($script:busy) { return }
         $script:logBox.Clear()
@@ -385,9 +385,9 @@ function Start-Gui {
     $bottom.Controls.Add($script:viewBtn)
 
     $script:uninstallBtn = New-Object System.Windows.Forms.Button
-    $script:uninstallBtn.Text = "🗑️ 卸载所选"
-    $script:uninstallBtn.Size = New-Object System.Drawing.Size(110, 32)
-    $script:uninstallBtn.Location = New-Object System.Drawing.Point(250, 5)
+    $script:uninstallBtn.Text = "🗑️ 卸载"
+    $script:uninstallBtn.Size = New-Object System.Drawing.Size(95, 32)
+    $script:uninstallBtn.Location = New-Object System.Drawing.Point(200, 5)
     $script:uninstallBtn.Add_Click({
         if (-not (Test-IsAdmin)) {
             [System.Windows.Forms.MessageBox]::Show("卸载需要管理员权限。`n请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』。", "需要管理员权限") | Out-Null
@@ -424,6 +424,21 @@ function Start-Gui {
         } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); ids = @($tools | ForEach-Object { $_.Id }) } -ActionName "卸载 $($tools.Count) 个工具"
     })
     $bottom.Controls.Add($script:uninstallBtn)
+
+    # 环境检测按钮（第二行）：job 后台跑 Show-Summary，结果实时显示到日志框
+    $script:envBtn = New-Object System.Windows.Forms.Button
+    $script:envBtn.Text = "🔍 环境检测"
+    $script:envBtn.Size = New-Object System.Drawing.Size(140, 32)
+    $script:envBtn.Location = New-Object System.Drawing.Point(0, 42)
+    $script:envBtn.Add_Click({
+        if ($script:busy) { return }
+        Invoke-GuiAction -Action {
+            Show-Summary
+            Write-Host ""
+            Write-Host "===== 环境检测完成 ====="
+        } -ActionName "环境检测"
+    })
+    $bottom.Controls.Add($script:envBtn)
 
     # 全选/全不选
     $script:selectAllBtn = New-Object System.Windows.Forms.Button

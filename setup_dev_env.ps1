@@ -111,6 +111,28 @@ function Search-WingetVersions {
     return $found
 }
 
+# Windows Terminal 版本检测：wt 是 GUI 启动器，执行 `wt --version` 会弹出新窗口（不输出到当前终端），
+# 改为读取 wt.exe 的文件版本信息（失败则报 CommandNotFoundException 让调用方显示"未安装"）
+function Get-WinTermVersion {
+    # 优先：Appx 包版本（Windows Terminal 是打包应用，最精确）
+    try {
+        $pkg = Get-AppxPackage -Name "*WindowsTerminal*" -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
+        if ($pkg -and $pkg.Version) { return $pkg.Version }
+    } catch { }
+    # 次选：wt.exe 文件版本（WindowsApps 别名，ProductVersion 常为 0.0.0）
+    try {
+        $wtCmd = Get-Command wt.exe -ErrorAction Stop
+        $info = (Get-Item $wtCmd.Source -ErrorAction Stop).VersionInfo
+        if ($info.ProductVersion -and $info.ProductVersion -notmatch '^0\.0\.0') { return $info.ProductVersion }
+    } catch { }
+    # 兜底：存在性确认
+    try {
+        $pkg = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WindowsApps" -Filter "wt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pkg) { return "已安装" }
+    } catch { }
+    throw [System.Management.Automation.CommandNotFoundException]::new("wt")
+}
+
 function Select-Version {
     param([string]$ToolName, [array]$Versions, [string]$SearchPrefix = "", [string]$Exclude = "")
     Write-Host "`n  ── 选择要安装的 $ToolName 版本 ──" -ForegroundColor $ColorMenu
@@ -960,7 +982,7 @@ function Install-7Zip {
 
 function Install-WinTerminal {
     return Invoke-Installer -ToolName "🪟 Windows Terminal" -ExeName "wt" -PackageId "Microsoft.WindowsTerminal" `
-        -DisplayName "Windows Terminal" -TargetDesc "Windows Terminal (最新稳定版)" -VersionCmd { wt --version 2>&1 } -VerReplace 'Windows Terminal Version '
+        -DisplayName "Windows Terminal" -TargetDesc "Windows Terminal (最新稳定版)" -VersionCmd { Get-WinTermVersion } -VerReplace ''
 }
 
 function Install-PowerToys {
@@ -1513,7 +1535,7 @@ function Show-Summary {
                 } else { throw [System.Management.Automation.CommandNotFoundException]::new("android-34") }
             }},
         @{L="7-Zip";    C={ 7z --help 2>&1 | Select-Object -First 1 }},
-        @{L="WinTerm";  C={ wt --version 2>&1 }},
+        @{L="WinTerm";  C={ Get-WinTermVersion }},
         @{L="PowerToys"; C={
                 $p = Join-Path ${env:ProgramFiles} "PowerToys\PowerToys.exe"
                 if (Test-Path $p) { (Get-Item $p).VersionInfo.ProductVersion } else { throw [System.Management.Automation.CommandNotFoundException]::new("PowerToys") }
