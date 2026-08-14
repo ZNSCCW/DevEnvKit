@@ -33,7 +33,7 @@ foreach ($f in $script:setupFuncs) {
 }
 # 覆盖交互函数为"GUI 自动模式"：已装不重装、版本选第 1 个（避免 Read-Host 卡住无控制台的 GUI）
 function Request-Confirmation { param([string]$ToolName, [string]$InstalledVersion, [string]$TargetVersionDesc) return $false }
-function Select-Version { param([string]$ToolName, [array]$Versions) return $Versions[0] }
+function Select-Version { param([string]$ToolName, [array]$Versions, [string]$SearchPrefix = "", [string]$Exclude = "") return $Versions[0] }
 function Write-AppendLog { param([string]$Message) }
 
 # GUI 版本选择对话框：主线程弹 ComboBox 让用户选安装版本（供安装按钮收集版本映射）
@@ -192,7 +192,7 @@ if (`$errors.Count -gt 0) { throw 'setup 解析失败' }
 foreach (`$f in `$funcs2) { Set-Item -Path "function:`$(`$f.Name)" -Value `$f.Body.GetScriptBlock() }
 function Request-Confirmation { param(`$ToolName, `$InstalledVersion, `$TargetVersionDesc) return `$false }
 function Select-Version {
-    param(`$ToolName, [array]`$Versions)
+    param(`$ToolName, [array]`$Versions, [string]`$SearchPrefix = "", [string]`$Exclude = "")
     if (`$versionMapText) {
         foreach (`$entry in (`$versionMapText -split ';')) {
             `$parts = `$entry -split '\|'

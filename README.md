@@ -187,8 +187,10 @@
 ### 🎯 版本选择（JDK / Python / Node.js）
 - 安装 JDK 时可选择 **JDK 8 / 11 / 17 / 21 (LTS)**，Python 可选 **3.11 / 3.12 / 3.13**，Node.js 可选 **20 / 22 (LTS)**
 - **命令行版**：安装前弹出交互版本菜单，直接回车用推荐版本（第 1 项）
-- **GUI 版**：勾选 Java/Python/Node 点击安装时，弹出版本选择框（ComboBox），选完再装；点「取消」用推荐版
+- **动态探测**：菜单末尾的「其他版本」会实时调用 `winget search` 列出该产品线**当前全部可用版本**——**未来新版本（JDK 24/25、Python 3.14 等）发布后零改动自动支持**，老版本（如 JDK 8 之前的更老版本不在 winget 内）也都能选
+- **GUI 版**：勾选 Java/Python/Node 点击安装时，弹出版本选择框（ComboBox），选完再装；点「跳过此工具」则不安装
 - `JAVA_HOME` 自动指向最新已装 JDK
+- **版本边界**：支持 **JDK 8+**（Adoptium/Temurin 产品线下限就是 JDK 8）；JDK 5-7 需 Oracle 归档（需 Oracle 账号 + 许可），脚本不提供
 
 ### 🛡️ 安装可靠性（PackageId 全部实测验证）
 - 所有 winget PackageId 已用 `winget show` 实测确认存在（修正了 Redis/DBeaver/MinGW 的错误 id）

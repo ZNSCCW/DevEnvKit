@@ -87,17 +87,67 @@ function Request-Confirmation {
 }
 
 # 版本选择器：Versions = @(@{Label="..."; PackageId="..."})，返回选中的项（默认第 1 项）
+# 动态探测 winget 上的可用版本（未来新版本零改动自动支持，如 JDK 24 / Python 3.14）
+function Search-WingetVersions {
+    param([string]$Prefix, [string]$Exclude = "")
+    Write-Host "  🔍 正在从 winget 探测 '$Prefix' 可用版本..." -ForegroundColor $ColorInfo
+    $out = winget search --id $Prefix --accept-source-agreements 2>&1
+    $found = @()
+    $escaped = [regex]::Escape($Prefix)
+    foreach ($line in $out) {
+        # 行内匹配"含前缀的连续 token"作为 PackageId（兼容名称列与 ID 列间 1 空格的情况，如 "Node.js (LTS)"）
+        if ($line -match "($escaped[A-Za-z0-9_.\-]*)") {
+            $pkgId = $matches[1]
+            if ($Exclude -and $pkgId -match $Exclude) { continue }
+            $ver = ""
+            # ID 后面的第一个版本号 token（如 "OpenJS.NodeJS.LTS 24.19.0"）
+            if ($line -match ([regex]::Escape($pkgId) + "\s+(\d+(\.\d+)+)")) { $ver = $matches[1] }
+            # 用 PSCustomObject（Hashtable 无法被 Sort-Object 按属性排序/去重）
+            $found += [PSCustomObject]@{ Label = "$pkgId ($ver)"; PackageId = $pkgId }
+        }
+    }
+    $found = @($found | Sort-Object PackageId -Unique)
+    if ($found.Count -eq 0) { Write-Warn "winget 探测无结果（源不可达或前缀不存在）" }
+    return $found
+}
+
 function Select-Version {
-    param([string]$ToolName, [array]$Versions)
+    param([string]$ToolName, [array]$Versions, [string]$SearchPrefix = "", [string]$Exclude = "")
     Write-Host "`n  ── 选择要安装的 $ToolName 版本 ──" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── 选择 $ToolName 版本 ──"
     for ($i = 0; $i -lt $Versions.Count; $i++) {
         Write-Host "    [$($i + 1)]  $($Versions[$i].Label)" -ForegroundColor $ColorMenu
     }
-    Write-Host "  ❓ 请输入版本编号 [1-$($Versions.Count)]，直接回车用第 1 项: " -NoNewline -ForegroundColor $ColorPrompt
+    $extraIdx = 0
+    if ($SearchPrefix) {
+        $extraIdx = $Versions.Count + 1
+        Write-Host "    [$extraIdx]  其他版本（winget 动态探测，含未来新版本）" -ForegroundColor $ColorInfo
+    }
+    Write-Host "  ❓ 请输入版本编号 [1-$extraIdx]，直接回车用第 1 项: " -NoNewline -ForegroundColor $ColorPrompt
     $sel = (Read-Host).Trim()
     $idx = 0
-    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $Versions.Count) { $idx = [int]$sel - 1 }
+    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $Versions.Count) {
+        $idx = [int]$sel - 1
+    }
+    elseif ($SearchPrefix -and $sel -eq "$extraIdx") {
+        # 动态探测分支：列出 winget 当前全部可用版本（新版本发布后免改代码）
+        $found = Search-WingetVersions -Prefix $SearchPrefix -Exclude $Exclude
+        if ($found.Count -eq 0) {
+            Write-Warn "使用推荐版本"
+            return $Versions[0]
+        }
+        for ($i = 0; $i -lt $found.Count; $i++) {
+            Write-Host "    [$($i + 1)]  $($found[$i].Label)" -ForegroundColor $ColorMenu
+        }
+        Write-Host "  ❓ 请输入探测到的版本编号 [1-$($found.Count)]，直接回车用第 1 项: " -NoNewline -ForegroundColor $ColorPrompt
+        $sel2 = (Read-Host).Trim()
+        $idx2 = 0
+        if ($sel2 -match '^\d+$' -and [int]$sel2 -ge 1 -and [int]$sel2 -le $found.Count) { $idx2 = [int]$sel2 - 1 }
+        else { Write-Warn "输入无效，默认选择第 1 项" }
+        Write-Info "已选择: $($found[$idx2].Label)"
+        Write-AppendLog "  ❓ 版本选择(winget 探测): $($found[$idx2].PackageId)"
+        return $found[$idx2]
+    }
     else { Write-Warn "输入无效，默认选择第 1 项" }
     Write-Info "已选择: $($Versions[$idx].Label)"
     Write-AppendLog "  ❓ 版本选择: $($Versions[$idx].Label)"
@@ -747,7 +797,7 @@ function Install-Python {
         @{Label="Python 3.12 (推荐)"; PackageId="Python.Python.3.12"},
         @{Label="Python 3.13";        PackageId="Python.Python.3.13"},
         @{Label="Python 3.11";        PackageId="Python.Python.3.11"}
-    )
+    ) -SearchPrefix "Python.Python.3"
     Write-Host "`n  ── 🐍 Python ($($choice.Label)) ──────────────────────────────" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── Python ($($choice.Label)) ──"
     if (Test-CommandExists "python") {
@@ -769,7 +819,7 @@ function Install-Java {
         @{Label="JDK 17 (LTS)";       PackageId="EclipseAdoptium.Temurin.17.JDK"},
         @{Label="JDK 11 (LTS)";       PackageId="EclipseAdoptium.Temurin.11.JDK"},
         @{Label="JDK 8 (LTS)";        PackageId="EclipseAdoptium.Temurin.8.JDK"}
-    )
+    ) -SearchPrefix "EclipseAdoptium.Temurin" -Exclude "\.JRE"
     Write-Host "`n  ── ☕ Java ($($choice.Label)) ────────────────────────────────" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── Java ($($choice.Label)) ──"
     if (Test-CommandExists "java") {
@@ -872,7 +922,7 @@ function Install-NodeJS {
     $choice = Select-Version -ToolName "Node.js" -Versions @(
         @{Label="Node.js 22 (LTS, 推荐)"; PackageId="OpenJS.NodeJS.LTS"},
         @{Label="Node.js 20 (LTS)";       PackageId="OpenJS.NodeJS.20"}
-    )
+    ) -SearchPrefix "OpenJS.NodeJS"
     Write-Host "`n  ── 🟢 Node.js ($($choice.Label)) ──────────────────────────────" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── Node.js ($($choice.Label)) ──"
     if (Test-CommandExists "node") {
