@@ -62,14 +62,14 @@ function Show-VersionDialog {
     $ok.DialogResult = "OK"
     $ok.Location = New-Object System.Drawing.Point(195, 90)
     $cancel = New-Object System.Windows.Forms.Button
-    $cancel.Text = "取消（用推荐版）"
+    $cancel.Text = "跳过此工具"
     $cancel.DialogResult = "Cancel"
     $cancel.Location = New-Object System.Drawing.Point(280, 90)
     $form.Controls.AddRange(@($label, $combo, $ok, $cancel))
     $form.AcceptButton = $ok
     $form.CancelButton = $cancel
     if ($form.ShowDialog() -eq "OK") { return $Versions[$combo.SelectedIndex] }
-    return $null   # 取消 → 子进程用推荐版（第一个）
+    return $null   # 跳过 → 不安装此工具
 }
 # setup 函数用到的颜色变量（GUI 无控制台，仍需定义避免 ForegroundColor 绑定失败）
 $ColorTitle = "Cyan"; $ColorSuccess = "Green"; $ColorError = "Red"; $ColorWarning = "Yellow"
@@ -318,23 +318,33 @@ function Start-Gui {
             return
         }
         $tools = @($selected | ForEach-Object { $_.Tag })
-        # 版本选择：对支持多版本的工具（Java/Python/Node）弹选择框，映射注入子进程
+        # 版本选择：对支持多版本的工具（Java/Python/Node）弹选择框；点「跳过此工具」= 不安装
         $versionMap = @{}
+        $installTools = @()
+        $skipped = @()
         foreach ($t in $tools) {
             if ($t.Versions) {
                 $chosen = Show-VersionDialog -ToolName $t.Name -Versions @($t.Versions)
-                if ($chosen) { $versionMap[$t.Name] = $chosen.PackageId }
+                if ($null -eq $chosen) { $skipped += $t.Name; continue }
+                $versionMap[$t.Name] = $chosen.PackageId
             }
+            $installTools += $t
+        }
+        if ($installTools.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("没有要安装的工具（已全部跳过）", "提示") | Out-Null
+            return
         }
         $mapText = ($versionMap.GetEnumerator() | ForEach-Object { "$($_.Key)|$($_.Value)" }) -join ';'
+        $skippedText = $skipped -join '、'
         Invoke-GuiAction -Action {
+            if ($skippedText) { Write-Host "已跳过（版本选择时点「跳过」）: $skippedText" }
             for ($i = 0; $i -lt $funcs.Count; $i++) {
                 Write-Host "===== 开始安装: $($names[$i]) ====="
                 try { & (Get-Item "function:$($funcs[$i])") } catch { Write-Host "安装失败: $_" }
                 Write-Host "----- 完成: $($names[$i]) -----"
             }
             Write-Host "===== 全部完成 ====="
-        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); versionMapText = $mapText } -ActionName "安装 $($tools.Count) 个工具"
+        } -Inject @{ funcs = @($installTools | ForEach-Object { $_.Func }); names = @($installTools | ForEach-Object { $_.Name }); versionMapText = $mapText; skippedText = $skippedText } -ActionName "安装 $($installTools.Count) 个工具"
     })
     $bottom.Controls.Add($script:installBtn)
 
