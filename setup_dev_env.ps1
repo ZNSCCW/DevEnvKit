@@ -1,6 +1,6 @@
 ﻿<#
 ============================================================================
-  🛠️  开发环境一键配置工具  v2.0
+  🛠️  开发环境一键配置工具  v2.1
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -50,7 +50,7 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v2.0           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v2.1           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
@@ -332,8 +332,9 @@ function Invoke-WingetInstall {
         Write-OK "$DisplayName 安装成功 (或已安装)"; return $true
     }
     elseif ($r -match "InternetOpenUrl|0x80072efd|0x80072ee7|0x80072f8f") {
-        Write-Fail "$DisplayName 安装失败: 无法连接到互联网"
-        Write-Info "请检查网络后重试，或到官网手动下载安装"; return $false
+        Write-Fail "$DisplayName 安装失败: 无法连接下载服务器"
+        Write-Info "可能原因：①网络未连接 ②GitHub 下载被拦截（如 Steam++ 加速器的 hosts 屏蔽，退出加速器后重试）③代理配置异常"
+        Write-Info "请退出加速器/检查网络后重试，或到官网手动下载安装"; return $false
     }
     elseif ($r -match "No package found|找不到与输入条件匹配") {
         Write-Fail "$DisplayName 安装失败: winget 中找不到该包 (PackageId=$PackageId)"
