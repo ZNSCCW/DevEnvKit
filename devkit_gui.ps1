@@ -35,6 +35,42 @@ foreach ($f in $script:setupFuncs) {
 function Request-Confirmation { param([string]$ToolName, [string]$InstalledVersion, [string]$TargetVersionDesc) return $false }
 function Select-Version { param([string]$ToolName, [array]$Versions) return $Versions[0] }
 function Write-AppendLog { param([string]$Message) }
+
+# GUI 版本选择对话框：主线程弹 ComboBox 让用户选安装版本（供安装按钮收集版本映射）
+function Show-VersionDialog {
+    param([string]$ToolName, [array]$Versions)
+    if (-not $Versions -or $Versions.Count -le 1) { return $Versions[0] }
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "选择 $ToolName 版本"
+    $form.Size = New-Object System.Drawing.Size(400, 170)
+    $form.StartPosition = "CenterParent"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = "请选择要安装的 $ToolName 版本："
+    $label.Location = New-Object System.Drawing.Point(15, 15)
+    $label.AutoSize = $true
+    $combo = New-Object System.Windows.Forms.ComboBox
+    $combo.Location = New-Object System.Drawing.Point(15, 45)
+    $combo.Size = New-Object System.Drawing.Size(345, 25)
+    $combo.DropDownStyle = "DropDownList"
+    foreach ($v in $Versions) { [void]$combo.Items.Add($v.Label) }
+    $combo.SelectedIndex = 0
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = "确定"
+    $ok.DialogResult = "OK"
+    $ok.Location = New-Object System.Drawing.Point(195, 90)
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = "取消（用推荐版）"
+    $cancel.DialogResult = "Cancel"
+    $cancel.Location = New-Object System.Drawing.Point(280, 90)
+    $form.Controls.AddRange(@($label, $combo, $ok, $cancel))
+    $form.AcceptButton = $ok
+    $form.CancelButton = $cancel
+    if ($form.ShowDialog() -eq "OK") { return $Versions[$combo.SelectedIndex] }
+    return $null   # 取消 → 子进程用推荐版（第一个）
+}
 # setup 函数用到的颜色变量（GUI 无控制台，仍需定义避免 ForegroundColor 绑定失败）
 $ColorTitle = "Cyan"; $ColorSuccess = "Green"; $ColorError = "Red"; $ColorWarning = "Yellow"
 $ColorInfo = "White"; $ColorMenu = "Magenta"; $ColorPrompt = "Cyan"; $ColorStep = "Cyan"
@@ -70,15 +106,24 @@ $script:toolGroups = @(
         @{ Name = "PowerToys";       Func = "Install-PowerToys";      Id = "Microsoft.PowerToys" },
         @{ Name = "VS Code";         Func = "Install-VSCode";         Id = "Microsoft.VisualStudioCode" })},
     @{ Group = "☕ Java 后端"; Tools = @(
-        @{ Name = "Java JDK";        Func = "Install-Java";           Id = "EclipseAdoptium.Temurin.21.JDK" },
+        @{ Name = "Java JDK";        Func = "Install-Java";           Id = "EclipseAdoptium.Temurin.21.JDK"; Versions = @(
+            @{Label="JDK 21 (LTS, 推荐)"; PackageId="EclipseAdoptium.Temurin.21.JDK"},
+            @{Label="JDK 17 (LTS)";       PackageId="EclipseAdoptium.Temurin.17.JDK"},
+            @{Label="JDK 11 (LTS)";       PackageId="EclipseAdoptium.Temurin.11.JDK"},
+            @{Label="JDK 8 (LTS)";        PackageId="EclipseAdoptium.Temurin.8.JDK"}) },
         @{ Name = "Maven";           Func = "Install-Maven";          Id = "" },
         @{ Name = "MySQL";           Func = "Install-MySQL";          Id = "Oracle.MySQL" },
         @{ Name = "Redis";           Func = "Install-Redis";          Id = "Redis.Redis" },
         @{ Name = "DBeaver";         Func = "Install-DBeaver";        Id = "DBeaver.DBeaver.Community" })},
     @{ Group = "🖥️ 前端 / Web"; Tools = @(
-        @{ Name = "Node.js";         Func = "Install-NodeJS";         Id = "OpenJS.NodeJS.LTS" })},
+        @{ Name = "Node.js";         Func = "Install-NodeJS";         Id = "OpenJS.NodeJS.LTS"; Versions = @(
+            @{Label="Node.js 22 (LTS, 推荐)"; PackageId="OpenJS.NodeJS.LTS"},
+            @{Label="Node.js 20 (LTS)";       PackageId="OpenJS.NodeJS.20"}) })},
     @{ Group = "🐍 Python"; Tools = @(
-        @{ Name = "Python";          Func = "Install-Python";         Id = "Python.Python.3.12" },
+        @{ Name = "Python";          Func = "Install-Python";         Id = "Python.Python.3.12"; Versions = @(
+            @{Label="Python 3.12 (推荐)"; PackageId="Python.Python.3.12"},
+            @{Label="Python 3.13";        PackageId="Python.Python.3.13"},
+            @{Label="Python 3.11";        PackageId="Python.Python.3.11"}) },
         @{ Name = "Miniconda";       Func = "Install-Miniconda";      Id = "Anaconda.Miniconda3" })},
     @{ Group = "⚙️ C/C++"; Tools = @(
         @{ Name = "C/C++ (MinGW+CMake)"; Func = "Install-CPP";        Id = "MSYS2.MSYS2" })},
@@ -146,7 +191,19 @@ if (`$errors.Count -gt 0) { throw 'setup 解析失败' }
 `$funcs2 = `$ast.FindAll({ param(`$n) `$n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, `$true)
 foreach (`$f in `$funcs2) { Set-Item -Path "function:`$(`$f.Name)" -Value `$f.Body.GetScriptBlock() }
 function Request-Confirmation { param(`$ToolName, `$InstalledVersion, `$TargetVersionDesc) return `$false }
-function Select-Version { param(`$ToolName, [array]`$Versions) return `$Versions[0] }
+function Select-Version {
+    param(`$ToolName, [array]`$Versions)
+    if (`$versionMapText) {
+        foreach (`$entry in (`$versionMapText -split ';')) {
+            `$parts = `$entry -split '\|'
+            if (`$parts.Count -ge 2 -and `$parts[0] -eq `$ToolName) {
+                `$v = `$Versions | Where-Object { `$_.PackageId -eq `$parts[1] }
+                if (`$v) { return `$v }
+            }
+        }
+    }
+    return `$Versions[0]
+}
 function Write-AppendLog { param(`$Message) }
 `$ColorTitle = 'Cyan'; `$ColorSuccess = 'Green'; `$ColorError = 'Red'; `$ColorWarning = 'Yellow'
 `$ColorInfo = 'White'; `$ColorMenu = 'Magenta'; `$ColorPrompt = 'Cyan'; `$ColorStep = 'Cyan'
@@ -261,6 +318,15 @@ function Start-Gui {
             return
         }
         $tools = @($selected | ForEach-Object { $_.Tag })
+        # 版本选择：对支持多版本的工具（Java/Python/Node）弹选择框，映射注入子进程
+        $versionMap = @{}
+        foreach ($t in $tools) {
+            if ($t.Versions) {
+                $chosen = Show-VersionDialog -ToolName $t.Name -Versions @($t.Versions)
+                if ($chosen) { $versionMap[$t.Name] = $chosen.PackageId }
+            }
+        }
+        $mapText = ($versionMap.GetEnumerator() | ForEach-Object { "$($_.Key)|$($_.Value)" }) -join ';'
         Invoke-GuiAction -Action {
             for ($i = 0; $i -lt $funcs.Count; $i++) {
                 Write-Host "===== 开始安装: $($names[$i]) ====="
@@ -268,7 +334,7 @@ function Start-Gui {
                 Write-Host "----- 完成: $($names[$i]) -----"
             }
             Write-Host "===== 全部完成 ====="
-        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }) } -ActionName "安装 $($tools.Count) 个工具"
+        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); versionMapText = $mapText } -ActionName "安装 $($tools.Count) 个工具"
     })
     $bottom.Controls.Add($script:installBtn)
 
