@@ -57,7 +57,6 @@ function Write-Host {
 
 # ===== 2. 全局状态 =====
 $script:logPath = Join-Path $env:TEMP "devkit_gui_log.txt"
-$script:progressPath = Join-Path $env:TEMP "devkit_progress.txt"   # 后台任务进度（每完成一个工具一行）
 $script:lastLogLength = 0
 $script:busy = $false
 $script:activeJob = $null    # 后台 PowerShell 任务（runspace）
@@ -112,18 +111,17 @@ function Update-LogBox {
 
 # ===== 5. 动作 =====
 # 安装/卸载在【后台 job（独立 powershell 子进程）】执行——否则 winget 耗时时 UI 线程被占、窗口卡死。
-# 子进程内重新加载 setup 函数 + 覆盖 Write-Host 写日志文件；每完成一个工具写一行 progressPath。
-# 日志框由 Timer 每 500ms 读文件刷新，进度条读 progressPath 行数，完成时 Timer 检查 job 状态恢复按钮。
+# 子进程内重新加载 setup 函数 + 覆盖 Write-Host 写日志文件。
+# 日志框由 Timer 每 500ms 读文件刷新；完成时 Timer 检查 job 状态恢复按钮。
 function Invoke-GuiAction {
-    param([scriptblock]$Action, [hashtable]$Inject = @{})
+    param([scriptblock]$Action, [hashtable]$Inject = @{}, [string]$ActionName = "操作")
     if ($script:busy) { return }
     $script:busy = $true
+    $script:lastActionName = $ActionName
     Update-LogBox
     Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
-    Remove-Item $script:progressPath -Force -ErrorAction SilentlyContinue
     $script:lastLogLength = 0
     $script:logBox.Clear()
-    $script:progressBar.Value = 0
 
     # 注入变量（数组转 PS 字面量，供子进程脚本使用）
     $injectText = ""
@@ -139,11 +137,9 @@ function Invoke-GuiAction {
 
     $setupPath = $script:setupPath
     $logPath = $script:logPath
-    $progressPath = $script:progressPath
     # 子进程初始化：加载 setup 函数 + GUI 自动模式覆盖 + Write-Host 覆盖写日志文件
     $initText = @"
 `$script:logPath = '$logPath'
-`$script:progressPath = '$progressPath'
 `$tokens = `$null; `$errors = `$null
 `$ast = [System.Management.Automation.Language.Parser]::ParseFile('$setupPath', [ref]`$tokens, [ref]`$errors)
 if (`$errors.Count -gt 0) { throw 'setup 解析失败' }
@@ -178,7 +174,6 @@ $script:switchJdkBtn = $null
 $script:switchPyBtn = $null
 $script:logBox = $null
 $script:statusLabel = $null
-$script:progressBar = $null
 
 # 管理员检测：卸载/切换 JDK/Python 需要写注册表环境变量，必须管理员
 function Test-IsAdmin {
@@ -235,20 +230,10 @@ function Start-Gui {
     $split.SplitterWidth = 6
     $split.Panel1.Controls.Add($checkPanel)
 
-    # ===== 右侧：进度条 + 日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
+    # ===== 右侧：日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
     $right = New-Object System.Windows.Forms.Panel
     $right.Dock = "Fill"
     $right.Padding = New-Object System.Windows.Forms.Padding(10)
-
-    # 进度条（安装/卸载按工具数步骤推进，位于日志框上方）
-    $script:progressBar = New-Object System.Windows.Forms.ProgressBar
-    $script:progressBar.Anchor = "Top, Left, Right"
-    $script:progressBar.Location = New-Object System.Drawing.Point(10, 10)
-    $script:progressBar.Size = New-Object System.Drawing.Size(820, 18)
-    $script:progressBar.Minimum = 0
-    $script:progressBar.Maximum = 100
-    $script:progressBar.Style = "Continuous"
-    $right.Controls.Add($script:progressBar)
 
     $script:logBox = New-Object System.Windows.Forms.TextBox
     $script:logBox.Multiline = $true
@@ -256,8 +241,8 @@ function Start-Gui {
     $script:logBox.ScrollBars = "Vertical"
     $script:logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
     $script:logBox.Anchor = "Top, Left, Right"
-    $script:logBox.Location = New-Object System.Drawing.Point(10, 34)
-    $script:logBox.Size = New-Object System.Drawing.Size(820, 446)
+    $script:logBox.Location = New-Object System.Drawing.Point(10, 10)
+    $script:logBox.Size = New-Object System.Drawing.Size(820, 470)
     $right.Controls.Add($script:logBox)
 
     $bottom = New-Object System.Windows.Forms.Panel
@@ -276,18 +261,14 @@ function Start-Gui {
             return
         }
         $tools = @($selected | ForEach-Object { $_.Tag })
-        $script:progressBar.Minimum = 0
-        $script:progressBar.Maximum = $tools.Count
-        $script:progressBar.Value = 0
         Invoke-GuiAction -Action {
             for ($i = 0; $i -lt $funcs.Count; $i++) {
                 Write-Host "===== 开始安装: $($names[$i]) ====="
                 try { & (Get-Item "function:$($funcs[$i])") } catch { Write-Host "安装失败: $_" }
-                Add-Content -Path $script:progressPath -Value 'x' -Encoding UTF8
                 Write-Host "----- 完成: $($names[$i]) -----"
             }
             Write-Host "===== 全部完成 ====="
-        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }) }
+        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }) } -ActionName "安装 $($tools.Count) 个工具"
     })
     $bottom.Controls.Add($script:installBtn)
 
@@ -325,30 +306,24 @@ function Start-Gui {
             [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         Invoke-GuiAction -Action {
-            $script:progressBar.Minimum = 0
-            $script:progressBar.Maximum = $tools.Count
-            $script:progressBar.Value = 0
-            Invoke-GuiAction -Action {
-                for ($i = 0; $i -lt $funcs.Count; $i++) {
-                    Write-Host "===== 卸载: $($names[$i]) ====="
-                    try {
-                        if ($ids[$i]) {
-                            winget uninstall --id $ids[$i] --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
-                            Write-Host "  卸载指令已执行 (退出码 $LASTEXITCODE)"
-                        } else {
-                            # Maven 特例（无 winget 包）：提示手动清理
-                            Write-Host "  Maven 无 winget 包——请手动删除目录并清理 MAVEN_HOME"
-                            [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
-                            $null = Remove-FromPath -Pattern 'maven' -AllScopes
-                            Write-Host "  MAVEN_HOME 已清除"
-                        }
-                    } catch { Write-Host "卸载失败: $_" }
-                    Add-Content -Path $script:progressPath -Value 'x' -Encoding UTF8
-                    Write-Host "----- 完成: $($names[$i]) -----"
-                }
-                Write-Host "===== 卸载流程完成 ====="
-            } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); ids = @($tools | ForEach-Object { $_.Id }) }
-        }
+            for ($i = 0; $i -lt $funcs.Count; $i++) {
+                Write-Host "===== 卸载: $($names[$i]) ====="
+                try {
+                    if ($ids[$i]) {
+                        winget uninstall --id $ids[$i] --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
+                        Write-Host "  卸载指令已执行 (退出码 $LASTEXITCODE)"
+                    } else {
+                        # Maven 特例（无 winget 包）：提示手动清理
+                        Write-Host "  Maven 无 winget 包——请手动删除目录并清理 MAVEN_HOME"
+                        [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
+                        $null = Remove-FromPath -Pattern 'maven' -AllScopes
+                        Write-Host "  MAVEN_HOME 已清除"
+                    }
+                } catch { Write-Host "卸载失败: $_" }
+                Write-Host "----- 完成: $($names[$i]) -----"
+            }
+            Write-Host "===== 卸载流程完成 ====="
+        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); ids = @($tools | ForEach-Object { $_.Id }) } -ActionName "卸载 $($tools.Count) 个工具"
     })
     $bottom.Controls.Add($script:uninstallBtn)
 
@@ -439,12 +414,11 @@ function Start-Gui {
     $script:statusLabel.Location = New-Object System.Drawing.Point(240, 47)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
-    # Resize 联动：进度条宽度 = 客户区宽；日志框高度 = 客户区 - 进度条 - 按钮面板（避免重叠）
+    # Resize 联动：日志框高度 = 客户区 - 按钮面板（避免重叠）
     $right.Add_Resize({
         $w = $right.ClientSize.Width - 20
         $h = $right.ClientSize.Height
-        $script:progressBar.Size = New-Object System.Drawing.Size($w, 18)
-        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 145))
+        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 120))
         $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(110, $h - 100))
         $bottom.Size = New-Object System.Drawing.Size($w, 90)
     })
@@ -457,25 +431,28 @@ function Start-Gui {
     $timer.Add_Tick({
         Update-LogBox
         if ($script:activeJob) {
-            # 进度：每完成一个工具 progressPath 增加一行
-            if (Test-Path $script:progressPath) {
-                $done = @(Get-Content $script:progressPath -Encoding UTF8 -ErrorAction SilentlyContinue).Count
-                if ($done -gt $script:progressBar.Value) {
-                    $script:progressBar.Value = [Math]::Min($done, $script:progressBar.Maximum)
-                }
-            }
             # 完成：job 状态非 Running → 恢复 UI
             $job = Get-Job -Id $script:activeJob.Id -ErrorAction SilentlyContinue
             if ($job -and $job.State -ne 'Running') {
-                $script:statusLabel.Text = "状态: $(if ($job.State -eq 'Completed') { '完成' } else { '出错' })"
-                if ($job.State -eq 'Failed') {
-                    $err = @(Receive-Job -Id $job.Id -ErrorAction SilentlyContinue)
-                    if ($err) { $err | Select-Object -Last 3 | ForEach-Object { Write-Host "  $_" }; Update-LogBox }
+                try {
+                    $jobOk = ($job.State -eq 'Completed')
+                    $script:statusLabel.Text = "状态: $(if ($jobOk) { '完成' } else { '出错' })"
+                    if (-not $jobOk) {
+                        # job 失败：把错误写入日志
+                        $err = @(Receive-Job -Id $job.Id -ErrorAction SilentlyContinue)
+                        foreach ($line in $err) { Write-Host "  $line" }
+                        Update-LogBox
+                    }
+                } finally {
+                    Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+                    $script:activeJob = $null
+                    $script:busy = $false
+                    Update-LogBox
                 }
-                Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
-                $script:activeJob = $null
-                $script:busy = $false
-                Update-LogBox
+                # 结果提示（弹一次）
+                [System.Windows.Forms.MessageBox]::Show(
+                    "$(if ($jobOk) { '操作完成' } else { '操作失败，详见日志' }): $($script:lastActionName)",
+                    "DevEnvKit") | Out-Null
             }
         }
     })
