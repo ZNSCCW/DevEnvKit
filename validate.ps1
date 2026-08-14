@@ -7,7 +7,7 @@ Write-Host "    setup_dev_env.ps1 代码审查 (精简版 v1.3)" -ForegroundColo
 Write-Host "  ═══════════════════════════════════════════`n" -ForegroundColor Cyan
 
 # === 1. 语法检查 ===
-Write-Host "  [1/5] 语法检查..." -ForegroundColor White
+Write-Host "  [1/6] 语法检查..." -ForegroundColor White
 $tokens = @()
 $errors = @()
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
@@ -19,11 +19,13 @@ if ($errors.Count -eq 0) {
     exit 1
 }
 
-$content = Get-Content $scriptPath -Raw
+# 关键：PowerShell 5.1 的 Get-Content 默认 ANSI(GBK) 解码，UTF-8 无 BOM 文件会错位——
+# 必须显式 -Encoding UTF8（否则 ^function 捕获组提取的函数名会错乱）
+$content = Get-Content $scriptPath -Raw -Encoding UTF8
 $lineCount = ($content -split "`n").Count
 
 # === 2. 结构完整性检查 ===
-Write-Host "`n  [2/5] 结构完整性..." -ForegroundColor White
+Write-Host "`n  [2/6] 结构完整性..." -ForegroundColor White
 $funcCount = [regex]::Matches($content, '(?m)^function \w+').Count
 $structuralChecks = @(
     @{Name="函数声明完整性"; Pass=($content -match "function Write-Title" -and 
@@ -44,7 +46,7 @@ foreach ($c in $structuralChecks) {
 }
 
 # === 3. 关键代码模式检查 ===
-Write-Host "`n  [3/5] 关键代码模式..." -ForegroundColor White
+Write-Host "`n  [3/6] 关键代码模式..." -ForegroundColor White
 $patternChecks = @(
     @{Name="completedSteps++ 存在"; Pass=($content -match '\$script:completedSteps\+\+')},
     @{Name="Request-Confirmation 确认机制"; Pass=($content -match "function Request-Confirmation")},
@@ -94,7 +96,7 @@ foreach ($c in $patternChecks) {
 }
 
 # === 4. 安全审计 ===
-Write-Host "`n  [4/5] 安全审计..." -ForegroundColor White
+Write-Host "`n  [4/6] 安全审计..." -ForegroundColor White
 $dangerPatterns = @(
     @{Name="无 Invoke-Expression 实际调用"; Pattern="Invoke-Expression"; Should=$true},
     @{Name="无 iex 别名"; Pattern="\biex\b"; Should=$false},
@@ -115,7 +117,7 @@ foreach ($d in $dangerPatterns) {
 }
 
 # === 5. 工具覆盖范围 ===
-Write-Host "`n  [5/5] 工具覆盖范围..." -ForegroundColor White
+Write-Host "`n  [5/6] 工具覆盖范围..." -ForegroundColor White
 $tools = @(
     @{Name="Git";      Install="Git.Git";                       Summary="git --version"},
     @{Name="Python";   Install="Python.Python.3.12";            Summary="python --version"},
@@ -181,6 +183,52 @@ foreach ($r in $redundancyPatterns) {
         Write-Host "  ❌ $($r.Name)" -ForegroundColor Red
         $allRedundantClean = $false
     }
+}
+
+# === 6. GUI (devkit_gui.ps1) 检查 ===
+Write-Host "`n  [6/6] GUI (devkit_gui.ps1) 检查..." -ForegroundColor White
+$guiPath = Join-Path $PSScriptRoot "devkit_gui.ps1"
+$batPath = Join-Path $PSScriptRoot "启动图形界面.bat"
+
+if (-not (Test-Path $guiPath)) {
+    Write-Host "  ❌ devkit_gui.ps1 不存在" -ForegroundColor Red
+} else {
+    # 6.1 GUI 语法
+    $guiTokens = @(); $guiErrors = @()
+    $null = [System.Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$guiTokens, [ref]$guiErrors)
+    if ($guiErrors.Count -eq 0) {
+        Write-Host "  ✅ GUI 语法: 通过 (0 错误)" -ForegroundColor Green
+    } else {
+        Write-Host "  ❌ GUI 语法: $($guiErrors.Count) 个错误" -ForegroundColor Red
+        $guiErrors | Select-Object -First 3 | ForEach-Object { Write-Host "     - $($_.Message)" -ForegroundColor Red }
+    }
+
+    # 6.2 toolGroups 里 Func 映射必须存在于 setup（同样必须 -Encoding UTF8）
+    # 注意：函数名含连字符（Install-Java），正则必须用 [\w-]+（\w 不含 -，只抓 Install 会误报缺失）
+    $guiContent = Get-Content $guiPath -Raw -Encoding UTF8
+    $setupFuncs = @([regex]::Matches($content, '(?m)^function ([\w-]+)') | ForEach-Object { $_.Groups[1].Value })
+    $guiToolFuncs = @([regex]::Matches($guiContent, 'Func = "([^"]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $missingFuncs = @($guiToolFuncs | Where-Object { $_ -notin $setupFuncs })
+    if ($missingFuncs.Count -eq 0) {
+        Write-Host "  ✅ GUI 工具函数映射: $($guiToolFuncs.Count) 个全部在 setup 中存在" -ForegroundColor Green
+    } else {
+        Write-Host "  ❌ GUI 工具函数缺失: $($missingFuncs -join ', ')" -ForegroundColor Red
+    }
+
+    # 6.3 GUI 直接调用的 setup 函数
+    $guiDirectCalls = @('Show-InstallLocations', 'Set-JavaEnv', 'Remove-FromPath', 'Add-ToPath', 'Load-Config', 'Save-Config', 'Write-Info', 'Write-OK', 'Write-Warn', 'Write-AppendLog')
+    $missingCalls = @($guiDirectCalls | Where-Object { $_ -notin $setupFuncs })
+    if ($missingCalls.Count -eq 0) {
+        Write-Host "  ✅ GUI 直接调用函数: $($guiDirectCalls.Count) 个全部存在" -ForegroundColor Green
+    } else {
+        Write-Host "  ❌ GUI 调用缺失: $($missingCalls -join ', ')" -ForegroundColor Red
+    }
+}
+
+if (Test-Path $batPath) {
+    Write-Host "  ✅ 启动图形界面.bat 存在" -ForegroundColor Green
+} else {
+    Write-Host "  ❌ 启动图形界面.bat 不存在" -ForegroundColor Red
 }
 
 # === 总结 ===

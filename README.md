@@ -135,7 +135,7 @@
 
 ### 🖥️ 图形界面（WinForms，v2.0）
 - **`启动图形界面.bat`** 双击即开 GUI（或 `powershell -File devkit_gui.ps1`）
-- 左侧：**18 个工具按开发方向分组勾选**（含 ☑️ 全选/全不选）；右侧：**实时日志框**（Start-Transcript 捕获）
+- 左侧：**18 个工具按开发方向分组勾选**（含 ☑️ 全选/全不选）；右侧：**进度条**（按工具数步骤推进）+ **实时日志框**（Start-Transcript 捕获）
 - 按钮：**⬇ 安装所选**（批量安装）、**📍 查看安装位置**、**🗑️ 卸载所选**（勾选→确认→`winget uninstall`，Maven 特例清环境变量）、**🔀 切换 JDK / 切换 Python**（InputBox 选版本，复用环境管理函数）
 - GUI 自动模式：已装工具不重复安装、版本选推荐项（无 Read-Host 阻塞）
 - **可打包成单文件 exe**：`ps2exe -inputFile devkit_gui.ps1 -outputFile DevEnvKit.exe -noConsole`（用户只下载 exe 双击即用；脚本转 exe 可能被杀软误报，需白名单/签名）

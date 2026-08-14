@@ -118,6 +118,7 @@ $script:switchJdkBtn = $null
 $script:switchPyBtn = $null
 $script:logBox = $null
 $script:statusLabel = $null
+$script:progressBar = $null
 
 # 管理员检测：卸载/切换 JDK/Python 需要写注册表环境变量，必须管理员
 function Test-IsAdmin {
@@ -174,10 +175,20 @@ function Start-Gui {
     $split.SplitterWidth = 6
     $split.Panel1.Controls.Add($checkPanel)
 
-    # ===== 右侧：日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
+    # ===== 右侧：进度条 + 日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
     $right = New-Object System.Windows.Forms.Panel
     $right.Dock = "Fill"
     $right.Padding = New-Object System.Windows.Forms.Padding(10)
+
+    # 进度条（安装/卸载按工具数步骤推进，位于日志框上方）
+    $script:progressBar = New-Object System.Windows.Forms.ProgressBar
+    $script:progressBar.Anchor = "Top, Left, Right"
+    $script:progressBar.Location = New-Object System.Drawing.Point(10, 10)
+    $script:progressBar.Size = New-Object System.Drawing.Size(820, 18)
+    $script:progressBar.Minimum = 0
+    $script:progressBar.Maximum = 100
+    $script:progressBar.Style = "Continuous"
+    $right.Controls.Add($script:progressBar)
 
     $script:logBox = New-Object System.Windows.Forms.TextBox
     $script:logBox.Multiline = $true
@@ -185,8 +196,8 @@ function Start-Gui {
     $script:logBox.ScrollBars = "Vertical"
     $script:logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
     $script:logBox.Anchor = "Top, Left, Right"
-    $script:logBox.Location = New-Object System.Drawing.Point(10, 10)
-    $script:logBox.Size = New-Object System.Drawing.Size(820, 470)
+    $script:logBox.Location = New-Object System.Drawing.Point(10, 34)
+    $script:logBox.Size = New-Object System.Drawing.Size(820, 446)
     $right.Controls.Add($script:logBox)
 
     $bottom = New-Object System.Windows.Forms.Panel
@@ -206,10 +217,20 @@ function Start-Gui {
         }
         $tools = @($selected | ForEach-Object { $_.Tag })
         Invoke-GuiAction -Action {
-            foreach ($t in $tools) {
+            $script:progressBar.Minimum = 0
+            $script:progressBar.Maximum = $tools.Count
+            $script:progressBar.Value = 0
+            for ($i = 0; $i -lt $tools.Count; $i++) {
+                $t = $tools[$i]
                 Write-Host "===== 开始安装: $($t.Name) ====="
+                $script:statusLabel.Text = "正在安装 $($t.Name) ($($i + 1)/$($tools.Count))..."
+                [System.Windows.Forms.Application]::DoEvents()
                 try { & (Get-Item "function:$($t.Func)") } catch { Write-Host "安装失败: $_" }
+                $script:progressBar.Value = $i + 1
+                $script:statusLabel.Text = "已完成 $($t.Name) ($($i + 1)/$($tools.Count))"
+                [System.Windows.Forms.Application]::DoEvents()
             }
+            $script:statusLabel.Text = "状态: 安装完成"
             Write-Host "===== 全部完成 ====="
         }
     })
@@ -242,8 +263,14 @@ function Start-Gui {
             [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         Invoke-GuiAction -Action {
-            foreach ($t in $tools) {
+            $script:progressBar.Minimum = 0
+            $script:progressBar.Maximum = $tools.Count
+            $script:progressBar.Value = 0
+            for ($i = 0; $i -lt $tools.Count; $i++) {
+                $t = $tools[$i]
                 Write-Host "===== 卸载: $($t.Name) ====="
+                $script:statusLabel.Text = "正在卸载 $($t.Name) ($($i + 1)/$($tools.Count))..."
+                [System.Windows.Forms.Application]::DoEvents()
                 try {
                     if ($t.Id) {
                         winget uninstall --id $t.Id --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
@@ -256,7 +283,11 @@ function Start-Gui {
                         Write-Host "  MAVEN_HOME 已清除"
                     }
                 } catch { Write-Host "卸载失败: $_" }
+                $script:progressBar.Value = $i + 1
+                $script:statusLabel.Text = "已卸载 $($t.Name) ($($i + 1)/$($tools.Count))"
+                [System.Windows.Forms.Application]::DoEvents()
             }
+            $script:statusLabel.Text = "状态: 卸载完成"
             Write-Host "===== 卸载流程完成 ====="
         }
     })
@@ -341,11 +372,12 @@ function Start-Gui {
     $script:statusLabel.Location = New-Object System.Drawing.Point(240, 47)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
-    # Resize 联动：日志框高度 = 客户区 - 按钮面板高（避免重叠）
+    # Resize 联动：进度条宽度 = 客户区宽；日志框高度 = 客户区 - 进度条 - 按钮面板（避免重叠）
     $right.Add_Resize({
         $w = $right.ClientSize.Width - 20
         $h = $right.ClientSize.Height
-        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 120))
+        $script:progressBar.Size = New-Object System.Drawing.Size($w, 18)
+        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 145))
         $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(110, $h - 100))
         $bottom.Size = New-Object System.Drawing.Size($w, 90)
     })
