@@ -155,12 +155,12 @@ function Start-Gui {
     $left.Controls.Add($checkPanel)
 
     # ===== 左右分割容器：SplitContainer（Panel1 固定勾选列表，Panel2 自动剩余，杜绝 Dock Fill 重叠） =====
+    # 注意：SplitterDistance / Panel1MinSize / Panel2MinSize 都必须在窗口显示后（Add_Shown）设置——
+    #       SplitContainer 默认 SplitterDistance 很小，创建时设 MinSize 会立即校验越界抛异常；
+    #       且三者互相约束（SplitterDistance ∈ [Panel1MinSize, Width - Panel2MinSize]），须按序设置
     $split = New-Object System.Windows.Forms.SplitContainer
     $split.Dock = "Fill"
     $split.Orientation = "Vertical"
-    $split.SplitterDistance = 360
-    $split.Panel1MinSize = 280
-    $split.Panel2MinSize = 320
     $split.SplitterWidth = 6
     $split.Panel1.Controls.Add($checkPanel)
 
@@ -250,7 +250,10 @@ function Start-Gui {
     # ===== 启动时显示已装工具位置（只读预览） =====
     $form.Add_Shown({
         $form.Activate()
-        $split.SplitterDistance = 360   # 显示后设置分割位置更可靠
+        # SplitContainer 参数须在窗口显示后按序设置（互相约束，创建时设会校验越界抛异常）
+        $split.SplitterDistance = 360
+        $split.Panel1MinSize = 280
+        $split.Panel2MinSize = 320
         Invoke-GuiAction -Action { Show-InstallLocations }
     })
 
