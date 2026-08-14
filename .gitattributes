@@ -1,0 +1,5 @@
+# 批处理文件必须 CRLF：cmd 解析 LF-only bat 会把单词拆成片段报 "not recognized"
+*.bat text eol=crlf
+
+# PowerShell 脚本支持 LF（保持仓库默认）
+*.ps1 text eol=lf
