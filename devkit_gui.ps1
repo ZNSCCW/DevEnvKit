@@ -155,7 +155,7 @@ function Start-Gui {
     $left.Controls.Add($checkPanel)
     $form.Controls.Add($left)
 
-    # ===== 右侧：日志 + 按钮 =====
+    # ===== 右侧：日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
     $right = New-Object System.Windows.Forms.Panel
     $right.Dock = "Fill"
     $right.Padding = New-Object System.Windows.Forms.Padding(10)
@@ -164,12 +164,16 @@ function Start-Gui {
     $script:logBox.Multiline = $true
     $script:logBox.ReadOnly = $true
     $script:logBox.ScrollBars = "Vertical"
-    $script:logBox.Dock = "Fill"
     $script:logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
+    $script:logBox.Anchor = "Top, Left, Right"
+    $script:logBox.Location = New-Object System.Drawing.Point(10, 10)
+    $script:logBox.Size = New-Object System.Drawing.Size(820, 470)
+    $right.Controls.Add($script:logBox)
 
     $bottom = New-Object System.Windows.Forms.Panel
-    $bottom.Dock = "Bottom"
-    $bottom.Height = 90
+    $bottom.Anchor = "Bottom, Left, Right"
+    $bottom.Location = New-Object System.Drawing.Point(10, 490)
+    $bottom.Size = New-Object System.Drawing.Size(820, 90)
 
     $script:installBtn = New-Object System.Windows.Forms.Button
     $script:installBtn.Text = "⬇ 安装所选"
@@ -217,9 +221,15 @@ function Start-Gui {
     $script:statusLabel.Location = New-Object System.Drawing.Point(0, 45)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
-    # Fill 控件必须最后添加：WinForms Dock 按添加顺序布局，先加 Bottom 再填 Fill 剩余空间
-    $right.Controls.Add($script:logBox)
     $form.Controls.Add($right)
+    # Resize 联动：日志框高度 = 客户区 - 按钮面板高（避免重叠）
+    $right.Add_Resize({
+        $w = $right.ClientSize.Width - 20
+        $h = $right.ClientSize.Height
+        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 120))
+        $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(110, $h - 100))
+        $bottom.Size = New-Object System.Drawing.Size($w, 90)
+    })
 
     # ===== Timer：日志刷新 =====
     $timer = New-Object System.Windows.Forms.Timer
