@@ -1,6 +1,6 @@
 ﻿<#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.7
+  🛠️  开发环境一键配置工具  v1.8
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -50,7 +50,7 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.7           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.8           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
@@ -476,6 +476,169 @@ function Switch-PythonVersion {
     Write-OK "已切换 Python 到 $($pythons[$idx].Name)，新终端生效 (python --version 验证)" -NoCount
 }
 
+# ========================== 安装位置查看/配置 + 卸载（v1.8） ==========================
+
+# 查看所有工具安装位置（Get-Command 探测 + 已知路径回退，纯只读）
+function Show-InstallLocations {
+    Write-Host "`n  ── 📍 已装工具安装位置 ────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 已装工具安装位置 ──"
+    $loc = @()
+    # 命令可探测的（Get-Command Source 或 --version 路径）
+    $cmdTools = @(
+        @{N="Git";           C="git";      Fallback="$env:ProgramFiles\Git"},
+        @{N="Python";        C="python";   Fallback="%LOCALAPPDATA%\Programs\Python"},
+        @{N="Node.js";       C="node";     Fallback="$env:ProgramFiles\nodejs"},
+        @{N="npm";           C="npm";      Fallback="$env:ProgramFiles\nodejs"},
+        @{N="Docker";        C="docker";   Fallback="$env:ProgramFiles\Docker\Docker"},
+        @{N="kubectl";       C="kubectl";  Fallback=""},
+        @{N="Miniconda";     C="conda";    Fallback="%LOCALAPPDATA%\miniconda3"},
+        @{N="DBeaver";       C="dbeaver";  Fallback="$env:ProgramFiles\DBeaver"},
+        @{N="7-Zip";         C="7z";       Fallback="$env:ProgramFiles\7-Zip"},
+        @{N="VS Code";       C="code";     Fallback="$env:ProgramFiles\Microsoft VS Code"},
+        @{N="CMake";         C="cmake";    Fallback="$env:ProgramFiles\CMake"},
+        @{N="Maven";         C="mvn";      Fallback="$env:ProgramFiles\Apache\Maven"}
+    )
+    foreach ($t in $cmdTools) {
+        $src = (Get-Command $t.C -ErrorAction SilentlyContinue).Source
+        if ($src) { $loc += "$($t.N.PadRight(10)): $src" }
+        elseif ($t.Fallback) {
+            $fb = $t.Fallback -replace '%LOCALAPPDATA%', $env:LOCALAPPDATA
+            if (Test-Path $fb) { $loc += "$($t.N.PadRight(10)): $fb" }
+        }
+    }
+    # 环境变量可探测的
+    $javaHome = [System.Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+    if ($javaHome) { $loc += "Java JDK  : $javaHome" }
+    else {
+        $jdks = @(Get-ChildItem "$env:ProgramFiles\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue)
+        if ($jdks) { $loc += "Java JDK  : $($jdks | ForEach-Object FullName) -join '; '" }
+    }
+    $mavenHome = [System.Environment]::GetEnvironmentVariable('MAVEN_HOME', 'Machine')
+    if ($mavenHome) { $loc += "Maven     : $mavenHome" }
+    $mysqlBin = Get-MySqlBin
+    if ($mysqlBin) { $loc += "MySQL     : $mysqlBin" }
+    $androidSdk = Get-AndroidSdkPath
+    if (Test-Path $androidSdk) { $loc += "AndroidSDK: $androidSdk" }
+    if (Test-Path "$env:ProgramFiles\Android\Android Studio") { $loc += "AndroidStudio: $env:ProgramFiles\Android\Android Studio" }
+    $redis = (Get-Command redis-cli -ErrorAction SilentlyContinue).Source
+    if ($redis) { $loc += "Redis     : $redis" }
+
+    if ($loc.Count -eq 0) { Write-Warn "未探测到已安装工具" }
+    foreach ($line in $loc) { Write-Host "  $line" -ForegroundColor $ColorInfo; Write-AppendLog "  $line" }
+    Write-Info "提示: 安装位置由各安装器决定；可自定义的仅 Maven/Android SDK（菜单 27 设置）"
+}
+
+# ===== 配置文件（简单 key=value，存 Maven/Android 等自定义目录） =====
+$script:configFile = Join-Path $script:baseDir "devkit.conf"
+
+function Load-Config {
+    if (Test-Path $script:configFile) {
+        Get-Content $script:configFile | Where-Object { $_ -match '^[^#=]+=.+$' } | ForEach-Object {
+            $kv = $_ -split '=', 2
+            Set-Variable -Name $kv[0].Trim() -Value $kv[1].Trim() -Scope Script
+        }
+    }
+    if (-not $script:mavenBase) { $script:mavenBase = "C:\Program Files\Apache\Maven" }
+    Write-AppendLog "  📄 已加载配置: $script:configFile"
+}
+
+function Save-Config {
+    "mavenBase=$($script:mavenBase)" | Out-File -FilePath $script:configFile -Encoding UTF8
+    Write-Info "配置已保存: $script:configFile"
+}
+
+# 设置安装目录（仅 Maven/Android SDK 可自定义；winget 安装的工具位置由安装器决定，无法修改）
+function Set-InstallBase {
+    Write-Host "`n  ── 📍 安装目录设置 ────────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 安装目录设置 ──"
+    Write-Info "winget 安装的工具 (JDK/Python/Node/Docker 等) 位置由安装器决定，**不可自定义**"
+    Write-Info "可自定义: Maven (当前: $script:mavenBase)"
+    $androidSdk = Get-AndroidSdkPath
+    Write-Info "          Android SDK (当前: $androidSdk)"
+    Write-Host "`n  1. 设置 Maven 安装目录" -ForegroundColor $ColorMenu
+    Write-Host "  2. 返回" -ForegroundColor $ColorMenu
+    Write-Host "  ❓ 请选择: " -NoNewline -ForegroundColor $ColorPrompt
+    $sel = (Read-Host).Trim()
+    if ($sel -eq '1') {
+        Write-Host "  请输入 Maven 安装目录 (如 D:\Tools\Maven, 回车用默认 $script:mavenBase): " -NoNewline -ForegroundColor $ColorPrompt
+        $input = (Read-Host).Trim()
+        if ($input) {
+            $script:mavenBase = $input
+            Save-Config
+            Write-OK "Maven 安装目录已设为: $script:mavenBase" -NoCount
+        }
+    }
+}
+
+# ===== 卸载 =====
+# 通用卸载：winget uninstall + 可选环境变量清理（删除前必须确认）
+function Uninstall-Tool {
+    param([string]$Name, [string]$PackageId, [scriptblock]$Cleanup, [string]$WingetHint = "")
+    Write-Host "`n  🗑️  卸载 $Name ?" -ForegroundColor $ColorWarning
+    Write-Host "  ❓ 确认卸载 $Name (Y/N): " -NoNewline -ForegroundColor $ColorPrompt
+    if ((Read-Host) -notmatch '^[Yy]$') { Write-Info "已取消"; return $false }
+    Write-Step "正在卸载 $Name ..."
+    if ($PackageId) {
+        $r = winget uninstall --id $PackageId --silent --accept-source-agreements 2>&1
+        if ($LASTEXITCODE -eq 0 -or $r -match "已卸载|uninstalled|not found") {
+            Write-OK "$Name 卸载成功" -NoCount
+        } else {
+            Write-Fail "$Name 卸载失败: $r"
+            if ($WingetHint) { Write-Info "可手动卸载: $WingetHint" }
+            return $false
+        }
+    }
+    # 环境变量/目录清理（Maven/Android 特例）
+    if ($Cleanup) { & $Cleanup }
+    return $true
+}
+
+# 卸载菜单：列出可卸载工具 → 选择 → 卸载
+function Uninstall-Menu {
+    Write-Host "`n  ── 🗑️  卸载已安装工具 ────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 卸载已安装工具 ──"
+    $uninstallables = @(
+        @{N="Git";            Id="Git.Git";                    Cleanup=$null;   Hint=""},
+        @{N="7-Zip";          Id="7zip.7zip";                  Cleanup=$null;   Hint=""},
+        @{N="Python";         Id="Python.Python.3.12";         Cleanup=$null;   Hint=""},
+        @{N="Java JDK";       Id="EclipseAdoptium.Temurin.21.JDK"; Cleanup=$null; Hint=""},
+        @{N="Node.js";        Id="OpenJS.NodeJS.LTS";          Cleanup=$null;   Hint=""},
+        @{N="Docker";         Id="Docker.DockerDesktop";       Cleanup=$null;   Hint=""},
+        @{N="VS Code";        Id="Microsoft.VisualStudioCode"; Cleanup=$null;   Hint=""},
+        @{N="MySQL";          Id="Oracle.MySQL";               Cleanup=$null;   Hint=""},
+        @{N="Redis";          Id="Redis.Redis";                Cleanup=$null;   Hint=""},
+        @{N="DBeaver";        Id="DBeaver.DBeaver.Community";  Cleanup=$null;   Hint=""},
+        @{N="kubectl";        Id="Kubernetes.kubectl";         Cleanup=$null;   Hint=""},
+        @{N="Miniconda";      Id="Anaconda.Miniconda3";        Cleanup=$null;   Hint=""},
+        @{N="Windows Terminal"; Id="Microsoft.WindowsTerminal"; Cleanup=$null;  Hint=""},
+        @{N="PowerToys";      Id="Microsoft.PowerToys";        Cleanup=$null;   Hint=""},
+        @{N="Maven (手动目录+环境变量)"; Id="";  Cleanup={ 
+                Write-Warn "请手动删除目录: $script:mavenBase"
+                [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
+                $null = Remove-FromPath -Pattern 'maven' -AllScopes
+                Write-OK "MAVEN_HOME 已清除" -NoCount
+            }; Hint=""},
+        @{N="Android (Studio+SDK+环境变量)"; Id="Google.AndroidStudio"; Cleanup={
+                Write-Warn "请手动删除: $env:ProgramFiles\Android\Android Studio 与 SDK 目录"
+                [System.Environment]::SetEnvironmentVariable("ANDROID_HOME", $null, "Machine")
+                [System.Environment]::SetEnvironmentVariable("ANDROID_SDK_ROOT", $null, "Machine")
+                $null = Remove-FromPath -Pattern 'Android|platform-tools' -AllScopes
+                Write-OK "ANDROID_HOME/SDK_ROOT 已清除" -NoCount
+            }; Hint=""}
+    )
+    for ($i = 0; $i -lt $uninstallables.Count; $i++) {
+        Write-Host "    [$($i + 1)]  $($uninstallables[$i].N)" -ForegroundColor $ColorMenu
+    }
+    Write-Host "  ❓ 选择要卸载的工具 [1-$($uninstallables.Count)] (0=返回): " -NoNewline -ForegroundColor $ColorPrompt
+    $sel = (Read-Host).Trim()
+    if ($sel -eq '0' -or $sel -eq '') { return }
+    $idx = 0
+    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $uninstallables.Count) { $idx = [int]$sel - 1 }
+    else { Write-Warn "无效选项"; return }
+    $t = $uninstallables[$idx]
+    $null = Uninstall-Tool -Name $t.N -PackageId $t.Id -Cleanup $t.Cleanup -WingetHint $t.Hint
+}
+
 # 通用安装包装器：检测 → 确认 → 安装 → 刷新PATH (消除 switch 中的重复代码)
 function Invoke-Installer {
     param([string]$ToolName, [string]$ExeName, [string]$PackageId, [string]$DisplayName, [string]$TargetDesc, [scriptblock]$VersionCmd, [string]$VerReplace)
@@ -555,6 +718,7 @@ function Install-Winget {
 # 杀软提示 + 架构检测（放在函数定义之后执行，避免引用未定义函数）
 Write-Warn "若后续安装失败或环境变量未生效，请暂时关闭杀毒软件(360/Defender)或在弹窗中点击'允许'"
 Write-Info "检测到系统架构: $(Get-OSArch)"
+Load-Config
 
 # 主流程启动前检查 winget 是否可用
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -834,7 +998,7 @@ function Install-Maven {
         if ($expectedSha) { Write-Info "已获取官方 SHA512 校验值 ($($expectedSha.Substring(0, 8))...)" }
     } catch { Write-Warn "无法获取 SHA512 校验值，本次跳过 Checksum 校验" }
     $tempZip = Join-Path $env:TEMP "apache-maven-$mavenVersion-bin.zip"
-    $installBase = "C:\Program Files\Apache\Maven"
+    $installBase = $script:mavenBase
     $mavenHome = Join-Path $installBase "apache-maven-$mavenVersion"
     
     try {
@@ -1376,6 +1540,9 @@ $menu = [ordered]@{
     '21' = @{Label="☸️ 仅安装 kubectl"; Action={ $null = Install-Kubectl }}
     '22' = @{Label="🐳 容器/运维全家桶 (20-21)"; Action={ Install-DevOpsStack }}
     '23' = @{Label="📋 查看当前环境摘要"; Action={ Show-Summary }}
+    '26' = @{Label="📍 查看已装工具安装位置"; Action={ Show-InstallLocations }}
+    '27' = @{Label="📍 安装目录设置 (Maven/Android SDK)"; Action={ Set-InstallBase }}
+    '28' = @{Label="🗑️ 卸载已安装工具"; Action={ Uninstall-Menu }}
 }
 
 # 菜单分组定义（组标题 → 菜单编号）
@@ -1387,7 +1554,7 @@ $menuGroups = [ordered]@{
     "⚙️ C/C++"      = @('18')
     "🤖 移动开发"    = @('19')
     "🐳 容器 / 运维" = @('20','21','22')
-    "📋 系统"        = @('23')
+    "📋 系统"        = @('23','26','27','28')
 }
 
 function Show-Menu {
