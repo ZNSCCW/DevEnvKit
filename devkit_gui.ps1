@@ -120,6 +120,7 @@ function Start-Gui {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "DevEnvKit 环境管理器 v2.0"
     $form.Size = New-Object System.Drawing.Size(860, 620)
+    $form.MinimumSize = New-Object System.Drawing.Size(700, 500)
     $form.StartPosition = "CenterScreen"
     $form.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
 
@@ -164,8 +165,7 @@ function Start-Gui {
     $script:logBox.ReadOnly = $true
     $script:logBox.ScrollBars = "Vertical"
     $script:logBox.Dock = "Fill"
-    $script:logBox.Font = New-Object System.Drawing.Font("Consolas", 9)
-    $right.Controls.Add($script:logBox)
+    $script:logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
 
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Dock = "Bottom"
@@ -217,6 +217,8 @@ function Start-Gui {
     $script:statusLabel.Location = New-Object System.Drawing.Point(0, 45)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
+    # Fill 控件必须最后添加：WinForms Dock 按添加顺序布局，先加 Bottom 再填 Fill 剩余空间
+    $right.Controls.Add($script:logBox)
     $form.Controls.Add($right)
 
     # ===== Timer：日志刷新 =====
