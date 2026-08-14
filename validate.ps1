@@ -70,7 +70,13 @@ $patternChecks = @(
     @{Name="下载停滞检测"; Pass=($content -match "StallSeconds" -and $content -match "停滞")},
     @{Name="下载自动重试"; Pass=($content -match "Retries" -and $content -match "重试")},
     @{Name="断点续传 Range"; Pass=($content -match "RangeHeaderValue" -and $content -match "PartialContent" -and $content -match "Append")},
-    @{Name="代理感知环境变量"; Pass=($content -match "HTTPS_PROXY" -and $content -match "WebProxy")}
+    @{Name="代理感知环境变量"; Pass=($content -match "HTTPS_PROXY" -and $content -match "WebProxy")},
+    @{Name="版本切换 Switch-JavaVersion"; Pass=($content -match "function Switch-JavaVersion" -and $content -match "Set-JavaEnv")},
+    @{Name="PATH 长度保护"; Pass=($content -match "function Add-ToPath" -and $content -match "2047")},
+    @{Name="%JAVA_HOME% 变量引用"; Pass=($content -match '%JAVA_HOME%\\bin')},
+    @{Name="注册表残留清理"; Pass=($content -match "function Clear-JavaRegistry" -and $content -match "JavaSoft")},
+    @{Name="架构检测"; Pass=($content -match "function Get-OSArch" -and $content -match "PROCESSOR_ARCHITECTURE")},
+    @{Name="Checksum 校验"; Pass=($content -match "ExpectedHash" -and $content -match "Get-FileHash")}
 )
 
 $allPatternsPass = $true

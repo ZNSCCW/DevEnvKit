@@ -1,6 +1,6 @@
 ﻿<#
 ============================================================================
-  🛠️  开发环境一键配置工具  v1.6
+  🛠️  开发环境一键配置工具  v1.7
   支持: Python / Java / C/C++ / Node.js / Git / Docker / Maven / MySQL 等
   适用于 Windows 10/11 (使用 winget 包管理器)
 ============================================================================
@@ -50,7 +50,7 @@ function Write-Title {
     Write-Host @"
 
   ╔══════════════════════════════════════════════════════════════╗
-  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.6           ║
+  ║        🛠️   开 发 环 境 一 键 配 置 工 具   v1.7           ║
   ║   Python · Java · C/C++ · Node.js · Git · Docker · ...      ║
   ╚══════════════════════════════════════════════════════════════╝
 
@@ -124,7 +124,9 @@ function Download-WithProgress {
         [string]$OutFile,
         [string]$Activity = "下载中",
         [int]$Retries = 2,
-        [int]$StallSeconds = 15
+        [int]$StallSeconds = 15,
+        [string]$ExpectedHash = "",
+        [string]$HashAlgorithm = "SHA256"
     )
     for ($attempt = 0; $attempt -le $Retries; $attempt++) {
         $client = $null; $response = $null; $stream = $null; $fs = $null
@@ -207,6 +209,14 @@ function Download-WithProgress {
             }
             $sw.Stop()
             Write-Progress -Activity "$Activity" -Completed
+            # Checksum 校验（可选：传了 ExpectedHash 才校验，失败抛异常走重试）
+            if ($ExpectedHash) {
+                $actual = (Get-FileHash -Path $OutFile -Algorithm $HashAlgorithm).Hash
+                if ($actual -ne $ExpectedHash.ToUpper()) {
+                    throw "Checksum 不匹配: 期望 $ExpectedHash，实际 $actual"
+                }
+                Write-Info "Checksum 校验通过 ($HashAlgorithm)"
+            }
             return $true
         } catch {
             Write-Progress -Activity "$Activity" -Completed
@@ -334,6 +344,100 @@ function Update-Path {
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
+# ========================== 环境管理（v1.7：环境管理器基础） ==========================
+
+# 架构检测：返回 arm64 / x64 / x86（winget 一般自动匹配，这里用于展示与日志）
+function Get-OSArch {
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    if ($arch -match "ARM64") { return "arm64" }
+    if ($env:PROCESSOR_ARCHITEW6432 -match "x86") { return "x86" }  # 32 位进程跑在 64 位系统
+    if ($arch -eq "AMD64") { return "x64" }
+    if ($arch -match "x86") { return "x86" }
+    return $arch
+}
+
+# 统一 PATH 追加：去重（幂等）+ 2047 长度保护（Windows 环境变量上限，超限截断会导致系统命令失灵）
+function Add-ToPath {
+    param([string]$Entry, [string]$Scope = "Machine")
+    $cur = [System.Environment]::GetEnvironmentVariable("Path", $Scope)
+    if ($cur -match [regex]::Escape($Entry)) { return $true }  # 已存在则跳过（幂等）
+    $new = "$cur;$Entry"
+    if ($new.Length -gt 2047) {
+        Write-Warn "PATH 超长 ($($new.Length)/2047)，未追加 '$Entry'——请手动清理 PATH 或改用变量引用 (如 %JAVA_HOME%\bin)"
+        return $false
+    }
+    [System.Environment]::SetEnvironmentVariable("Path", $new, $Scope)
+    Write-OK "已将 $Entry 追加到系统 PATH" -NoCount
+    return $true
+}
+
+# 从 PATH 移除匹配正则的条目（用于清理旧 JDK 绝对路径）
+function Remove-FromPath {
+    param([string]$Pattern, [string]$Scope = "Machine")
+    $cur = [System.Environment]::GetEnvironmentVariable("Path", $Scope)
+    $parts = $cur -split ';' | Where-Object { $_ -and ($_ -notmatch $Pattern) }
+    $new = $parts -join ';'
+    if ($new -ne $cur) {
+        [System.Environment]::SetEnvironmentVariable("Path", $new, $Scope)
+        return $true
+    }
+    return $false
+}
+
+# 设置 JAVA_HOME + PATH 用 %JAVA_HOME%\bin 变量引用（以后切换版本只改 JAVA_HOME 一处）
+# 同时清理 PATH 中旧 JDK 的绝对路径，避免系统里残留老版本抢先生效
+function Set-JavaEnv {
+    param([string]$JdkPath)
+    if (-not $JdkPath -or -not (Test-Path (Join-Path $JdkPath "bin\java.exe"))) {
+        Write-Warn "无效的 JDK 路径: $JdkPath"; return $false
+    }
+    # 1. 清理 PATH 中旧 JDK 的绝对路径（Eclipse Adoptium\jdk-*\bin），保留 %JAVA_HOME%\bin 变量引用
+    if (Remove-FromPath -Pattern 'Eclipse Adoptium\\jdk-[^;]*\\bin') {
+        Write-Info "已清理 PATH 中的旧 JDK 绝对路径"
+    }
+    # 2. 写入 JAVA_HOME（无论之前是否设置都更新——版本切换核心）
+    [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $JdkPath, "Machine")
+    Write-OK "JAVA_HOME 已设置为: $JdkPath" -NoCount
+    # 3. 确保 PATH 含 %JAVA_HOME%\bin（变量引用，切换只改 JAVA_HOME）
+    $null = Add-ToPath -Entry "%JAVA_HOME%\bin"
+    Update-Path
+    return $true
+}
+
+# 切换 Java 版本（环境管理器核心）：列出已装 Temurin JDK → 选择 → Set-JavaEnv
+function Switch-JavaVersion {
+    Write-Host "`n  ── 🔀 切换 Java 版本 (JAVA_HOME) ────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 切换 Java 版本 ──"
+    $jdks = @(Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    if ($jdks.Count -eq 0) {
+        Write-Warn "未检测到已安装的 Temurin JDK，请先安装 (菜单 7)"
+        return
+    }
+    $curHome = [System.Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+    Write-Info "当前 JAVA_HOME: $curHome"
+    for ($i = 0; $i -lt $jdks.Count; $i++) {
+        $marker = ""
+        if ($jdks[$i].FullName -eq $curHome) { $marker = "  ← 当前" }
+        Write-Host "    [$($i + 1)]  $($jdks[$i].Name)$marker" -ForegroundColor $ColorMenu
+    }
+    Write-Host "  ❓ 选择要切换的版本 [1-$($jdks.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
+    $sel = (Read-Host).Trim()
+    $idx = 0
+    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $jdks.Count) { $idx = [int]$sel - 1 }
+    else { Write-Warn "输入无效，默认选择第 1 项" }
+    $null = Set-JavaEnv -JdkPath $jdks[$idx].FullName
+    Write-OK "已切换 Java 到 $($jdks[$idx].Name)，新终端生效 (用 java -version 验证)" -NoCount
+}
+
+# 清理注册表 JavaSoft 残留（干净安装；Eclipse 等 IDE 读注册表而非 PATH）
+function Clear-JavaRegistry {
+    $javaSoft = "HKLM:\SOFTWARE\JavaSoft"
+    if (Test-Path $javaSoft) {
+        Remove-Item $javaSoft -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Info "已清理注册表旧 JavaSoft 残留 (HKLM\SOFTWARE\JavaSoft)"
+    }
+}
+
 # 通用安装包装器：检测 → 确认 → 安装 → 刷新PATH (消除 switch 中的重复代码)
 function Invoke-Installer {
     param([string]$ToolName, [string]$ExeName, [string]$PackageId, [string]$DisplayName, [string]$TargetDesc, [scriptblock]$VersionCmd, [string]$VerReplace)
@@ -410,6 +514,10 @@ function Install-Winget {
     return $false
 }
 
+# 杀软提示 + 架构检测（放在函数定义之后执行，避免引用未定义函数）
+Write-Warn "若后续安装失败或环境变量未生效，请暂时关闭杀毒软件(360/Defender)或在弹窗中点击'允许'"
+Write-Info "检测到系统架构: $(Get-OSArch)"
+
 # 主流程启动前检查 winget 是否可用
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     if (-not (Install-Winget)) {
@@ -464,15 +572,16 @@ function Install-Java {
         }
     }
     $r = Invoke-WingetInstall -PackageId $choice.PackageId -DisplayName $choice.Label
-    # 设置 JAVA_HOME（搜索所有已装 Temurin JDK，取最新）
+    # 环境配置：统一走 Set-JavaEnv（JAVA_HOME 更新 + PATH 用 %JAVA_HOME%\bin 引用 + 清理旧 JDK 路径）
     try {
-        if (-not ${env:JAVA_HOME}) {
-            $latest = Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue |
-                      Sort-Object Name -Descending | Select-Object -First 1
-            if ($latest) { [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $latest.FullName, "Machine"); Write-OK "JAVA_HOME 已设置为: $($latest.FullName)" -NoCount }
+        $latest = Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object Name -Descending | Select-Object -First 1
+        if ($latest) {
+            $null = Set-JavaEnv -JdkPath $latest.FullName
+            # 干净安装：清理注册表旧 JavaSoft 残留（Eclipse 等 IDE 读注册表）
+            Clear-JavaRegistry
         }
     } catch { Write-Warn "JAVA_HOME 设置失败，请手动配置" }
-    Update-Path
     return $r
 }
 
@@ -529,8 +638,7 @@ function Install-CPP {
                         if (Test-Path (Join-Path $mp "gcc.exe")) {
                             $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
                             if ($curPath -notmatch [regex]::Escape($mp)) {
-                                [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$mp", "Machine")
-                                Write-OK "已追加 $mp 到系统 PATH" -NoCount
+                                $null = Add-ToPath -Entry $mp
                             }
                         }
                     }
@@ -674,11 +782,19 @@ function Install-Maven {
     
     Write-Info "目标版本: Apache Maven $mavenVersion"
     
-    # 下载 Maven 二进制包（官方源 → 阿里云镜像回退，各自带重试）
+    # 下载 Maven 二进制包（官方源 → 阿里云镜像回退，各自带重试 + SHA512 校验）
     $mavenZipUrls = @(
         "https://dlcdn.apache.org/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip",
         "https://mirrors.aliyun.com/apache/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip"
     )
+    # 尝试获取官方 SHA512 校验值（拿不到则跳过校验）
+    $expectedSha = ""
+    try {
+        $hashUrl = "https://dlcdn.apache.org/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip.sha512"
+        $hashResp = Invoke-WebRequest -Uri $hashUrl -TimeoutSec 15 -ErrorAction Stop
+        $expectedSha = (($hashResp.Content -split '\s+')[0]).Trim()
+        if ($expectedSha) { Write-Info "已获取官方 SHA512 校验值 ($($expectedSha.Substring(0, 8))...)" }
+    } catch { Write-Warn "无法获取 SHA512 校验值，本次跳过 Checksum 校验" }
     $tempZip = Join-Path $env:TEMP "apache-maven-$mavenVersion-bin.zip"
     $installBase = "C:\Program Files\Apache\Maven"
     $mavenHome = Join-Path $installBase "apache-maven-$mavenVersion"
@@ -694,7 +810,7 @@ function Install-Maven {
         $downloaded = $false
         foreach ($zipUrl in $mavenZipUrls) {
             Write-Info "下载源: $($zipUrl.Split('/')[2])"
-            if (Download-WithProgress -Uri $zipUrl -OutFile $tempZip -Activity "下载 Apache Maven $mavenVersion") {
+            if (Download-WithProgress -Uri $zipUrl -OutFile $tempZip -Activity "下载 Apache Maven $mavenVersion" -ExpectedHash $expectedSha -HashAlgorithm SHA512) {
                 $downloaded = $true; break
             }
             Write-Warn "该源下载失败，尝试下一个镜像..."
@@ -729,8 +845,7 @@ function Install-Maven {
         $mavenBin = Join-Path $mavenHome "bin"
         $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
         if ($curPath -notmatch [regex]::Escape($mavenBin)) {
-            [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$mavenBin", "Machine")
-            Write-OK "已将 Maven bin 添加到系统 PATH" -NoCount
+            $null = Add-ToPath -Entry $mavenBin
         }
         
         Update-Path
@@ -973,8 +1088,7 @@ function Install-Android {
             if (Test-Path $ptPath) {
                 $curPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
                 if ($curPath -notmatch [regex]::Escape($ptPath)) {
-                    [System.Environment]::SetEnvironmentVariable("Path", "$curPath;$ptPath", "Machine")
-                    Write-OK "已将 platform-tools 添加到系统 PATH" -NoCount
+                    $null = Add-ToPath -Entry $ptPath
                 }
             }
         } catch {
@@ -1211,6 +1325,7 @@ $menu = [ordered]@{
     '10' = @{Label="🔴 仅安装 Redis"; Action={ $null = Install-Redis }}
     '11' = @{Label="🗄️ 仅安装 DBeaver"; Action={ $null = Install-DBeaver }}
     '12' = @{Label="☕ Java 后端全家桶 (7-11)"; Action={ Install-JavaStack }}
+    '24' = @{Label="🔀 切换 Java 版本 (JAVA_HOME)"; Action={ Switch-JavaVersion }}
     '13' = @{Label="🟢 仅安装 Node.js"; Action={ $null = Install-NodeJS }}
     '14' = @{Label="🖥️ 前端全家桶 (Node.js + VS Code)"; Action={ Install-WebStack }}
     '15' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
@@ -1227,7 +1342,7 @@ $menu = [ordered]@{
 # 菜单分组定义（组标题 → 菜单编号）
 $menuGroups = [ordered]@{
     "🧩 基础必备"    = @('1','2','3','4','5','6')
-    "☕ Java 后端"   = @('7','8','9','10','11','12')
+    "☕ Java 后端"   = @('7','8','9','10','11','12','24')
     "🖥️ 前端 / Web" = @('13','14')
     "🐍 Python"      = @('15','16','17')
     "⚙️ C/C++"      = @('18')
