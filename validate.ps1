@@ -76,7 +76,8 @@ $patternChecks = @(
     @{Name="%JAVA_HOME% 变量引用"; Pass=($content -match '%JAVA_HOME%\\bin')},
     @{Name="注册表残留清理"; Pass=($content -match "function Clear-JavaRegistry" -and $content -match "JavaSoft")},
     @{Name="架构检测"; Pass=($content -match "function Get-OSArch" -and $content -match "PROCESSOR_ARCHITECTURE")},
-    @{Name="Checksum 校验"; Pass=($content -match "ExpectedHash" -and $content -match "Get-FileHash")}
+    @{Name="Checksum 校验"; Pass=($content -match "ExpectedHash" -and $content -match "Get-FileHash")},
+    @{Name="Python 版本切换"; Pass=($content -match "function Switch-PythonVersion" -and $content -match "Python3\\d\+")}
 )
 
 $allPatternsPass = $true

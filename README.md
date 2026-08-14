@@ -126,8 +126,10 @@
 
 ### 🔀 环境管理器基础：多版本切换
 - 新增菜单项 **[24] 切换 Java 版本 (JAVA_HOME)**：列出已装 Temurin JDK → 选择 → 一键切换默认
+- 新增菜单项 **[25] 切换 Python 版本 (PATH)**：列出已装 Python（用户级/系统级）→ 选择 → 更新 PATH（pyenv 思路）
 - `Set-JavaEnv`：**PATH 用 `%JAVA_HOME%\bin` 变量引用**（切换只改 JAVA_HOME 一处），并**自动清理 PATH 中旧 JDK 的绝对路径**（避免老版本抢先生效）
 - `JAVA_HOME` 不再"只在未设置时写"——安装/切换都会更新
+- **Node.js 说明**：winget 装 Node 到同一目录是**覆盖安装**（无法共存），多版本请用 `fnm` 或 `nvm-windows`——脚本不内置 Node 切换
 
 ### 🛡️ 环境变量安全（PowerShell 三件套）
 - `Add-ToPath` 统一 PATH 追加：**去重（幂等）+ 2047 字符长度保护**（超限不追加并提示，避免截断导致系统命令失灵）
@@ -279,6 +281,7 @@ dev_env_setup/
   ── 🐍 Python ──
   [15] 🐍 Python       [16] 🐍 Miniconda
   [17] 🐍 Python 全家桶
+  [25] 🔀 切换 Python 版本 (PATH)
   ── ⚙️ C/C++ ──
   [18] ⚙️ C/C++ (MinGW + CMake)
   ── 🤖 移动开发 ──

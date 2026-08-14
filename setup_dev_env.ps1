@@ -438,6 +438,42 @@ function Clear-JavaRegistry {
     }
 }
 
+# 切换 Python 版本：列出已装 Python → 选择 → 更新 PATH（pyenv 思路，复用 Remove-FromPath/Add-ToPath）
+# 注意：Node.js 不走此机制——winget 装 Node 到同一目录会覆盖，多版本应用 fnm/nvm-windows
+function Switch-PythonVersion {
+    Write-Host "`n  ── 🐍 切换 Python 版本 ────────────────────────────────" -ForegroundColor $ColorMenu
+    Write-AppendLog "`n  ── 切换 Python 版本 ──"
+    # 扫描已装 Python（winget 用户级 %LOCALAPPDATA%\Programs\Python + 系统级 Program Files）
+    $pythons = @()
+    foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), "C:\Program Files\Python3*")) {
+        $pythons += @(Get-ChildItem $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue)
+    }
+    $pythons = @($pythons | Sort-Object Name -Descending | Select-Object -Unique)
+    if ($pythons.Count -eq 0) {
+        Write-Warn "未检测到已安装的 Python（winget 用户级/系统级路径），请先安装 (菜单 15)"
+        return
+    }
+    $current = (Get-Command python -ErrorAction SilentlyContinue).Source
+    for ($i = 0; $i -lt $pythons.Count; $i++) {
+        $marker = ""
+        if ($current -and $pythons[$i].FullName -eq (Split-Path $current -Parent)) { $marker = "  ← 当前" }
+        Write-Host "    [$($i + 1)]  $($pythons[$i].Name)$marker" -ForegroundColor $ColorMenu
+    }
+    Write-Host "  ❓ 选择要切换的版本 [1-$($pythons.Count)]: " -NoNewline -ForegroundColor $ColorPrompt
+    $sel = (Read-Host).Trim()
+    $idx = 0
+    if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $pythons.Count) { $idx = [int]$sel - 1 }
+    else { Write-Warn "输入无效，默认选择第 1 项" }
+    $target = $pythons[$idx].FullName
+    # 清理 PATH 中的旧 Python 路径（Python3x 目录段），再加新路径（幂等+长度保护）
+    if (Remove-FromPath -Pattern 'Python3\d+') {
+        Write-Info "已清理 PATH 中的旧 Python 路径"
+    }
+    $null = Add-ToPath -Entry $target
+    Update-Path
+    Write-OK "已切换 Python 到 $($pythons[$idx].Name)，新终端生效 (python --version 验证)" -NoCount
+}
+
 # 通用安装包装器：检测 → 确认 → 安装 → 刷新PATH (消除 switch 中的重复代码)
 function Invoke-Installer {
     param([string]$ToolName, [string]$ExeName, [string]$PackageId, [string]$DisplayName, [string]$TargetDesc, [scriptblock]$VersionCmd, [string]$VerReplace)
@@ -1331,6 +1367,7 @@ $menu = [ordered]@{
     '15' = @{Label="🐍 仅安装 Python"; Action={ $null = Install-Python }}
     '16' = @{Label="🐍 仅安装 Miniconda"; Action={ $null = Install-Miniconda }}
     '17' = @{Label="🐍 Python 全家桶 (15-16)"; Action={ Install-PythonStack }}
+    '25' = @{Label="🔀 切换 Python 版本 (PATH)"; Action={ Switch-PythonVersion }}
     '18' = @{Label="⚙️ 仅安装 C/C++ (MinGW + CMake)"; Action={ $null = Install-CPP }}
     '19' = @{Label="🤖 仅安装 Android Studio + SDK 34+"; Action={ $null = Install-Android }}
     '20' = @{Label="🐳 仅安装 Docker"; Action={ $null = Install-Docker }}
@@ -1344,7 +1381,7 @@ $menuGroups = [ordered]@{
     "🧩 基础必备"    = @('1','2','3','4','5','6')
     "☕ Java 后端"   = @('7','8','9','10','11','12','24')
     "🖥️ 前端 / Web" = @('13','14')
-    "🐍 Python"      = @('15','16','17')
+    "🐍 Python"      = @('15','16','17','25')
     "⚙️ C/C++"      = @('18')
     "🤖 移动开发"    = @('19')
     "🐳 容器 / 运维" = @('20','21','22')
