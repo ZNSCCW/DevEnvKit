@@ -321,13 +321,13 @@ function Start-Gui {
     $script:logBox.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
     $script:logBox.Anchor = "Top, Left, Right"
     $script:logBox.Location = New-Object System.Drawing.Point(10, 10)
-    $script:logBox.Size = New-Object System.Drawing.Size(820, 470)
+    $script:logBox.Size = New-Object System.Drawing.Size(820, 440)
     $right.Controls.Add($script:logBox)
 
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Anchor = "Bottom, Left, Right"
-    $bottom.Location = New-Object System.Drawing.Point(10, 490)
-    $bottom.Size = New-Object System.Drawing.Size(820, 90)
+    $bottom.Location = New-Object System.Drawing.Point(10, 460)
+    $bottom.Size = New-Object System.Drawing.Size(820, 120)
 
     $script:installBtn = New-Object System.Windows.Forms.Button
     $script:installBtn.Text = "⬇ 安装所选"
@@ -429,7 +429,7 @@ function Start-Gui {
     $script:envBtn = New-Object System.Windows.Forms.Button
     $script:envBtn.Text = "🔍 环境检测"
     $script:envBtn.Size = New-Object System.Drawing.Size(140, 32)
-    $script:envBtn.Location = New-Object System.Drawing.Point(0, 42)
+    $script:envBtn.Location = New-Object System.Drawing.Point(0, 79)
     $script:envBtn.Add_Click({
         if ($script:busy) { return }
         Invoke-GuiAction -Action {
@@ -531,9 +531,9 @@ function Start-Gui {
     $right.Add_Resize({
         $w = $right.ClientSize.Width - 20
         $h = $right.ClientSize.Height
-        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 120))
-        $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(110, $h - 100))
-        $bottom.Size = New-Object System.Drawing.Size($w, 90)
+        $script:logBox.Size = New-Object System.Drawing.Size($w, [Math]::Max(100, $h - 150))
+        $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(130, $h - 140))
+        $bottom.Size = New-Object System.Drawing.Size($w, 120)
     })
     $split.Panel2.Controls.Add($right)
     $form.Controls.Add($split)
