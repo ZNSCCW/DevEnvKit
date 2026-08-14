@@ -57,8 +57,10 @@ function Write-Host {
 
 # ===== 2. 全局状态 =====
 $script:logPath = Join-Path $env:TEMP "devkit_gui_log.txt"
+$script:progressPath = Join-Path $env:TEMP "devkit_progress.txt"   # 后台任务进度（每完成一个工具一行）
 $script:lastLogLength = 0
 $script:busy = $false
+$script:activeJob = $null    # 后台 PowerShell 任务（runspace）
 
 # ===== 3. 工具清单（按开发方向分组，Label 与菜单一致） =====
 $script:toolGroups = @(
@@ -109,21 +111,63 @@ function Update-LogBox {
 }
 
 # ===== 5. 动作 =====
-# 运行一组函数，输出经覆盖版 Write-Host 写入日志文件（ps2exe noConsole 下不能用 Start-Transcript，会逐条弹框）
+# 安装/卸载在【后台 job（独立 powershell 子进程）】执行——否则 winget 耗时时 UI 线程被占、窗口卡死。
+# 子进程内重新加载 setup 函数 + 覆盖 Write-Host 写日志文件；每完成一个工具写一行 progressPath。
+# 日志框由 Timer 每 500ms 读文件刷新，进度条读 progressPath 行数，完成时 Timer 检查 job 状态恢复按钮。
 function Invoke-GuiAction {
-    param([scriptblock]$Action)
+    param([scriptblock]$Action, [hashtable]$Inject = @{})
     if ($script:busy) { return }
     $script:busy = $true
-    try {
-        Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
-        $script:lastLogLength = 0
-        $script:logBox.Clear()
-        & $Action
-        Update-LogBox
-    } finally {
-        $script:busy = $false
-        Update-LogBox
+    Update-LogBox
+    Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
+    Remove-Item $script:progressPath -Force -ErrorAction SilentlyContinue
+    $script:lastLogLength = 0
+    $script:logBox.Clear()
+    $script:progressBar.Value = 0
+
+    # 注入变量（数组转 PS 字面量，供子进程脚本使用）
+    $injectText = ""
+    foreach ($k in $Inject.Keys) {
+        $v = $Inject[$k]
+        if ($v -is [array]) {
+            $items = @($v | ForEach-Object { "'" + $_.ToString().Replace("'", "''") + "'" })
+            $injectText += "`$$k = @($($items -join ', '))`n"
+        } else {
+            $injectText += "`$$k = '" + $v.ToString().Replace("'", "''") + "'`n"
+        }
     }
+
+    $setupPath = $script:setupPath
+    $logPath = $script:logPath
+    $progressPath = $script:progressPath
+    # 子进程初始化：加载 setup 函数 + GUI 自动模式覆盖 + Write-Host 覆盖写日志文件
+    $initText = @"
+`$script:logPath = '$logPath'
+`$script:progressPath = '$progressPath'
+`$tokens = `$null; `$errors = `$null
+`$ast = [System.Management.Automation.Language.Parser]::ParseFile('$setupPath', [ref]`$tokens, [ref]`$errors)
+if (`$errors.Count -gt 0) { throw 'setup 解析失败' }
+`$funcs2 = `$ast.FindAll({ param(`$n) `$n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, `$true)
+foreach (`$f in `$funcs2) { Set-Item -Path "function:`$(`$f.Name)" -Value `$f.Body.GetScriptBlock() }
+function Request-Confirmation { param(`$ToolName, `$InstalledVersion, `$TargetVersionDesc) return `$false }
+function Select-Version { param(`$ToolName, [array]`$Versions) return `$Versions[0] }
+function Write-AppendLog { param(`$Message) }
+`$ColorTitle = 'Cyan'; `$ColorSuccess = 'Green'; `$ColorError = 'Red'; `$ColorWarning = 'Yellow'
+`$ColorInfo = 'White'; `$ColorMenu = 'Magenta'; `$ColorPrompt = 'Cyan'; `$ColorStep = 'Cyan'
+`$script:baseDir = Split-Path '$setupPath'
+function Write-Host {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = `$true)] [object]`$Object,
+        [object]`$ForegroundColor, [object]`$BackgroundColor, [switch]`$NoNewline, [object]`$Separator = ' '
+    )
+    `$text = (`$Object | ForEach-Object { if (`$null -eq `$_) { '' } else { [string]`$_ } }) -join "`$Separator"
+    if (-not `$NoNewline) { `$text += "`r`n" }
+    Add-Content -Path `$script:logPath -Value `$text -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+"@
+    $jobScript = [scriptblock]::Create($injectText + $initText + $Action.ToString())
+    $script:activeJob = Start-Job -ScriptBlock $jobScript
 }
 
 $script:installBtn = $null
@@ -232,23 +276,18 @@ function Start-Gui {
             return
         }
         $tools = @($selected | ForEach-Object { $_.Tag })
+        $script:progressBar.Minimum = 0
+        $script:progressBar.Maximum = $tools.Count
+        $script:progressBar.Value = 0
         Invoke-GuiAction -Action {
-            $script:progressBar.Minimum = 0
-            $script:progressBar.Maximum = $tools.Count
-            $script:progressBar.Value = 0
-            for ($i = 0; $i -lt $tools.Count; $i++) {
-                $t = $tools[$i]
-                Write-Host "===== 开始安装: $($t.Name) ====="
-                $script:statusLabel.Text = "正在安装 $($t.Name) ($($i + 1)/$($tools.Count))..."
-                [System.Windows.Forms.Application]::DoEvents()
-                try { & (Get-Item "function:$($t.Func)") } catch { Write-Host "安装失败: $_" }
-                $script:progressBar.Value = $i + 1
-                $script:statusLabel.Text = "已完成 $($t.Name) ($($i + 1)/$($tools.Count))"
-                [System.Windows.Forms.Application]::DoEvents()
+            for ($i = 0; $i -lt $funcs.Count; $i++) {
+                Write-Host "===== 开始安装: $($names[$i]) ====="
+                try { & (Get-Item "function:$($funcs[$i])") } catch { Write-Host "安装失败: $_" }
+                Add-Content -Path $script:progressPath -Value 'x' -Encoding UTF8
+                Write-Host "----- 完成: $($names[$i]) -----"
             }
-            $script:statusLabel.Text = "状态: 安装完成"
             Write-Host "===== 全部完成 ====="
-        }
+        } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }) }
     })
     $bottom.Controls.Add($script:installBtn)
 
@@ -256,7 +295,14 @@ function Start-Gui {
     $script:viewBtn.Text = "📍 查看安装位置"
     $script:viewBtn.Size = New-Object System.Drawing.Size(120, 32)
     $script:viewBtn.Location = New-Object System.Drawing.Point(120, 5)
-    $script:viewBtn.Add_Click({ Invoke-GuiAction -Action { Show-InstallLocations } })
+    $script:viewBtn.Add_Click({
+        if ($script:busy) { return }
+        $script:logBox.Clear()
+        Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
+        $script:lastLogLength = 0
+        Show-InstallLocations
+        Update-LogBox
+    })
     $bottom.Controls.Add($script:viewBtn)
 
     $script:uninstallBtn = New-Object System.Windows.Forms.Button
@@ -282,29 +328,26 @@ function Start-Gui {
             $script:progressBar.Minimum = 0
             $script:progressBar.Maximum = $tools.Count
             $script:progressBar.Value = 0
-            for ($i = 0; $i -lt $tools.Count; $i++) {
-                $t = $tools[$i]
-                Write-Host "===== 卸载: $($t.Name) ====="
-                $script:statusLabel.Text = "正在卸载 $($t.Name) ($($i + 1)/$($tools.Count))..."
-                [System.Windows.Forms.Application]::DoEvents()
-                try {
-                    if ($t.Id) {
-                        winget uninstall --id $t.Id --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
-                        Write-Host "  卸载指令已执行 (退出码 $LASTEXITCODE)"
-                    } else {
-                        # Maven 特例（无 winget 包）：提示手动清理
-                        Write-Host "  Maven 无 winget 包——请手动删除目录并清理 MAVEN_HOME"
-                        [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
-                        $null = Remove-FromPath -Pattern 'maven' -AllScopes
-                        Write-Host "  MAVEN_HOME 已清除"
-                    }
-                } catch { Write-Host "卸载失败: $_" }
-                $script:progressBar.Value = $i + 1
-                $script:statusLabel.Text = "已卸载 $($t.Name) ($($i + 1)/$($tools.Count))"
-                [System.Windows.Forms.Application]::DoEvents()
-            }
-            $script:statusLabel.Text = "状态: 卸载完成"
-            Write-Host "===== 卸载流程完成 ====="
+            Invoke-GuiAction -Action {
+                for ($i = 0; $i -lt $funcs.Count; $i++) {
+                    Write-Host "===== 卸载: $($names[$i]) ====="
+                    try {
+                        if ($ids[$i]) {
+                            winget uninstall --id $ids[$i] --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
+                            Write-Host "  卸载指令已执行 (退出码 $LASTEXITCODE)"
+                        } else {
+                            # Maven 特例（无 winget 包）：提示手动清理
+                            Write-Host "  Maven 无 winget 包——请手动删除目录并清理 MAVEN_HOME"
+                            [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
+                            $null = Remove-FromPath -Pattern 'maven' -AllScopes
+                            Write-Host "  MAVEN_HOME 已清除"
+                        }
+                    } catch { Write-Host "卸载失败: $_" }
+                    Add-Content -Path $script:progressPath -Value 'x' -Encoding UTF8
+                    Write-Host "----- 完成: $($names[$i]) -----"
+                }
+                Write-Host "===== 卸载流程完成 ====="
+            } -Inject @{ funcs = @($tools | ForEach-Object { $_.Func }); names = @($tools | ForEach-Object { $_.Name }); ids = @($tools | ForEach-Object { $_.Id }) }
         }
     })
     $bottom.Controls.Add($script:uninstallBtn)
@@ -327,25 +370,29 @@ function Start-Gui {
     $script:switchJdkBtn.Size = New-Object System.Drawing.Size(100, 30)
     $script:switchJdkBtn.Location = New-Object System.Drawing.Point(0, 42)
     $script:switchJdkBtn.Add_Click({
-        Invoke-GuiAction -Action {
-            if (-not (Test-IsAdmin)) {
-                Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
-                return
-            }
-            # 扫描 Temurin (Eclipse Adoptium) + Oracle (C:\Program Files\Java) 两种安装路径
-            $jdks = @()
-            foreach ($base in @("C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*")) {
-                $jdks += @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue)
-            }
-            $jdks = @($jdks | Sort-Object Name -Descending | Select-Object -Unique)
-            if ($jdks.Count -eq 0) { Write-Host "未检测到已安装 JDK，请先安装"; return }
-            for ($i = 0; $i -lt $jdks.Count; $i++) { Write-Host "  [$($i + 1)]  $($jdks[$i].Name)" }
-            $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 JDK 编号 [1-$($jdks.Count)]，回车默认 1", "切换 Java 版本", "1")
-            $idx = 0
-            if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $jdks.Count) { $idx = [int]$sel - 1 }
-            $null = Set-JavaEnv -JdkPath $jdks[$idx].FullName
-            Write-Host "已切换 JDK → $($jdks[$idx].Name)（新终端生效，java -version 验证）"
+        # 切换是秒级操作，同步执行（不经 runspace，需 InputBox 交互）
+        if ($script:busy) { return }
+        $script:logBox.Clear()
+        Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
+        $script:lastLogLength = 0
+        if (-not (Test-IsAdmin)) {
+            Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
+            Update-LogBox; return
         }
+        # 扫描 Temurin (Eclipse Adoptium) + Oracle (C:\Program Files\Java) 两种安装路径
+        $jdks = @()
+        foreach ($base in @("C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*")) {
+            $jdks += @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue)
+        }
+        $jdks = @($jdks | Sort-Object Name -Descending | Select-Object -Unique)
+        if ($jdks.Count -eq 0) { Write-Host "未检测到已安装 JDK，请先安装"; Update-LogBox; return }
+        for ($i = 0; $i -lt $jdks.Count; $i++) { Write-Host "  [$($i + 1)]  $($jdks[$i].Name)" }
+        $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 JDK 编号 [1-$($jdks.Count)]，回车默认 1", "切换 Java 版本", "1")
+        $idx = 0
+        if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $jdks.Count) { $idx = [int]$sel - 1 }
+        $null = Set-JavaEnv -JdkPath $jdks[$idx].FullName
+        Write-Host "已切换 JDK → $($jdks[$idx].Name)（新终端生效，java -version 验证）"
+        Update-LogBox
     })
     $bottom.Controls.Add($script:switchJdkBtn)
 
@@ -355,30 +402,34 @@ function Start-Gui {
     $script:switchPyBtn.Size = New-Object System.Drawing.Size(110, 30)
     $script:switchPyBtn.Location = New-Object System.Drawing.Point(110, 42)
     $script:switchPyBtn.Add_Click({
-        Invoke-GuiAction -Action {
-            if (-not (Test-IsAdmin)) {
-                Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
-                return
-            }
-            $pythons = @()
-            foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), "C:\Program Files\Python3*")) {
-                $pythons += @(Get-ChildItem $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue)
-            }
-            $pythons = @($pythons | Sort-Object Name -Descending | Select-Object -Unique)
-            if ($pythons.Count -eq 0) { Write-Host "未检测到已安装 Python，请先安装"; return }
-            for ($i = 0; $i -lt $pythons.Count; $i++) {
-                $ver = ""
-                try { $ver = (& (Join-Path $pythons[$i].FullName "python.exe") --version 2>&1) -replace '^Python\s*', '' } catch {}
-                $verPart = if ($ver) { " (Python $ver)" } else { "" }
-                Write-Host "  [$($i + 1)]  $($pythons[$i].Name)$verPart"
-            }
-            $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 Python 编号 [1-$($pythons.Count)]，回车默认 1", "切换 Python 版本", "1")
-            $idx = 0
-            if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $pythons.Count) { $idx = [int]$sel - 1 }
-            $null = Remove-FromPath -Pattern 'Python3\d+' -AllScopes
-            $null = Add-ToPath -Entry $pythons[$idx].FullName -AllScopes
-            Write-Host "已切换 Python → $($pythons[$idx].Name)（新终端生效，python --version 验证）"
+        # 切换是秒级操作，同步执行（不经 runspace，需 InputBox 交互）
+        if ($script:busy) { return }
+        $script:logBox.Clear()
+        Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
+        $script:lastLogLength = 0
+        if (-not (Test-IsAdmin)) {
+            Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
+            Update-LogBox; return
         }
+        $pythons = @()
+        foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), "C:\Program Files\Python3*")) {
+            $pythons += @(Get-ChildItem $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue)
+        }
+        $pythons = @($pythons | Sort-Object Name -Descending | Select-Object -Unique)
+        if ($pythons.Count -eq 0) { Write-Host "未检测到已安装 Python，请先安装"; Update-LogBox; return }
+        for ($i = 0; $i -lt $pythons.Count; $i++) {
+            $ver = ""
+            try { $ver = (& (Join-Path $pythons[$i].FullName "python.exe") --version 2>&1) -replace '^Python\s*', '' } catch {}
+            $verPart = if ($ver) { " (Python $ver)" } else { "" }
+            Write-Host "  [$($i + 1)]  $($pythons[$i].Name)$verPart"
+        }
+        $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 Python 编号 [1-$($pythons.Count)]，回车默认 1", "切换 Python 版本", "1")
+        $idx = 0
+        if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $pythons.Count) { $idx = [int]$sel - 1 }
+        $null = Remove-FromPath -Pattern 'Python3\d+' -AllScopes
+        $null = Add-ToPath -Entry $pythons[$idx].FullName -AllScopes
+        Write-Host "已切换 Python → $($pythons[$idx].Name)（新终端生效，python --version 验证）"
+        Update-LogBox
     })
     $bottom.Controls.Add($script:switchPyBtn)
 
@@ -400,10 +451,34 @@ function Start-Gui {
     $split.Panel2.Controls.Add($right)
     $form.Controls.Add($split)
 
-    # ===== Timer：日志刷新 =====
+    # ===== Timer：日志刷新 + 后台任务进度/完成检测 =====
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 500
-    $timer.Add_Tick({ Update-LogBox })
+    $timer.Add_Tick({
+        Update-LogBox
+        if ($script:activeJob) {
+            # 进度：每完成一个工具 progressPath 增加一行
+            if (Test-Path $script:progressPath) {
+                $done = @(Get-Content $script:progressPath -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+                if ($done -gt $script:progressBar.Value) {
+                    $script:progressBar.Value = [Math]::Min($done, $script:progressBar.Maximum)
+                }
+            }
+            # 完成：job 状态非 Running → 恢复 UI
+            $job = Get-Job -Id $script:activeJob.Id -ErrorAction SilentlyContinue
+            if ($job -and $job.State -ne 'Running') {
+                $script:statusLabel.Text = "状态: $(if ($job.State -eq 'Completed') { '完成' } else { '出错' })"
+                if ($job.State -eq 'Failed') {
+                    $err = @(Receive-Job -Id $job.Id -ErrorAction SilentlyContinue)
+                    if ($err) { $err | Select-Object -Last 3 | ForEach-Object { Write-Host "  $_" }; Update-LogBox }
+                }
+                Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+                $script:activeJob = $null
+                $script:busy = $false
+                Update-LogBox
+            }
+        }
+    })
     $timer.Start()
 
     # ===== 启动时显示已装工具位置（只读预览） =====
@@ -413,7 +488,11 @@ function Start-Gui {
         $split.SplitterDistance = 360
         $split.Panel1MinSize = 280
         $split.Panel2MinSize = 320
-        Invoke-GuiAction -Action { Show-InstallLocations }
+        # 启动预览：同步执行（秒级）
+        Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
+        $script:lastLogLength = 0
+        Show-InstallLocations
+        Update-LogBox
     })
 
     [System.Windows.Forms.Application]::Run($form)
