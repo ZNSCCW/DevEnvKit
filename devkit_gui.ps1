@@ -11,7 +11,12 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic   # InputBox 支持（版本切换）
 
 # ===== 1. 加载 setup_dev_env.ps1 的全部函数（AST 提取，不执行主流程） =====
-$script:setupPath = Join-Path $PSScriptRoot "setup_dev_env.ps1"
+# 注意：ps2exe 打包成 exe 后 $PSScriptRoot 为空字符串——用 Get-ScriptDir 兼容 exe/ps1 两种运行方式
+function Get-ScriptDir {
+    if ($PSScriptRoot) { return $PSScriptRoot }
+    return Split-Path -Parent ([Environment]::GetCommandLineArgs()[0])
+}
+$script:setupPath = Join-Path (Get-ScriptDir) "setup_dev_env.ps1"
 if (-not (Test-Path $script:setupPath)) { $script:setupPath = "setup_dev_env.ps1" }
 $script:tokens = $null; $script:parseErrors = $null
 $script:setupAst = [System.Management.Automation.Language.Parser]::ParseFile(
