@@ -124,8 +124,10 @@
 
 ## 新增功能 (v2.0)
 
-### 🎉 图形界面主版本
+### 🎉 图形界面主版本（v2.0 → 持续演进）
 - 从 v1.x（命令行）升级为 **v2.0（图形界面为主）**：新增 WinForms GUI（`启动图形界面.bat` 双击即开），控制台版保留
+- **v2.1 演进**：安装/卸载改**后台 job 执行**（窗口不卡死，日志实时刷新，完成后弹结果框）；修复卸载失效（Invoke-GuiAction 嵌套导致内层空跑）；移除无用进度条
+- **打包分发**：`build.ps1` 打包单文件 exe（ps2exe + 自签名 + SHA256），防拦截策略见打包章节
 - 修复 bat 启动器编码问题（改为 ASCII 提示，避免 UTF-8 无 BOM 被 cmd 按 GBK 解析产生乱码）
 - 入口选择：**`启动图形界面.bat`**（GUI） / **`启动配置工具.bat`**（控制台）
 
@@ -135,10 +137,11 @@
 
 ### 🖥️ 图形界面（WinForms，v2.0）
 - **`启动图形界面.bat`** 双击即开 GUI（或 `powershell -File devkit_gui.ps1`）
-- 左侧：**18 个工具按开发方向分组勾选**（含 ☑️ 全选/全不选）；右侧：**进度条**（按工具数步骤推进）+ **实时日志框**（Start-Transcript 捕获）
-- 按钮：**⬇ 安装所选**（批量安装）、**📍 查看安装位置**、**🗑️ 卸载所选**（勾选→确认→`winget uninstall`，Maven 特例清环境变量）、**🔀 切换 JDK / 切换 Python**（InputBox 选版本，复用环境管理函数）
+- 左侧：**18 个工具按开发方向分组勾选**（含 ☑️ 全选/全不选）；右侧：**实时日志框** + 底部按钮区
+- 按钮：**⬇ 安装所选**（批量安装）、**📍 查看安装位置**、**🗑️ 卸载所选**（勾选→确认→`winget uninstall`，Maven 特例清环境变量）、**🔀 切换 JDK / 切换 Python**（InputBox 选版本，复用环境管理函数）、**☑️ 全选/全不选**
+- **安装/卸载在后台 job（独立 powershell 子进程）执行，窗口全程不卡**：日志由覆盖版 `Write-Host` 写入文件、Timer 每 500ms 刷新日志框；完成后弹结果提示框并恢复按钮
 - GUI 自动模式：已装工具不重复安装、版本选推荐项（无 Read-Host 阻塞）
-- **可打包成单文件 exe**：`ps2exe -inputFile devkit_gui.ps1 -outputFile DevEnvKit.exe -noConsole`（用户只下载 exe 双击即用；脚本转 exe 可能被杀软误报，需白名单/签名）
+- **可打包成单文件 exe**：`.\build.ps1`（ps2exe + 自签名）→ `DevEnvKit.exe`
 
 ### 📍 安装位置查看与配置
 - 菜单 **[26] 查看已装工具安装位置**：探测并列出全部工具的安装路径（`Get-Command` 来源 + 已知路径回退 + 环境变量），纯只读
@@ -226,6 +229,8 @@
 - 注意：故意**不加壳 / 不加密**（ps2exe 的 `-encrypt`、UPX 等混淆反而**增加**启发式误报）
 - **已知坑（已修复）**：ps2exe 打包后 `$PSScriptRoot` 为空字符串，会报 `Path 参数为空`——`devkit_gui.ps1` 已用 `Get-ScriptDir`（ps1 用 `$PSScriptRoot`，exe 用 `GetCommandLineArgs()[0]`）兼容两种运行方式
 - **已知坑（已修复）**：ps2exe `-noConsole` 下 `Write-Host` 没有控制台可写，会**逐条弹 MessageBox**——已覆盖 `Write-Host` 为"写入日志文件"版本（日志框由 Timer 读取刷新），不再用 Start-Transcript
+- **已知坑（已修复）**：bat 自动提权（`net session` 检测 + `Start-Process -Verb RunAs`）会导致**黑窗一闪即退**——回退为普通启动 + 提示"右键以管理员身份运行"；GUI 内卸载/切换前检测管理员并弹友好提示
+- **已知坑（已修复）**：`.gitignore` 曾为 **UTF-16 编码**（`Add-Content -Encoding Unicode` 写入），git 只认 UTF-8/ASCII → **ignore 规则从未生效**；已转 UTF-8
 
 ---
 
