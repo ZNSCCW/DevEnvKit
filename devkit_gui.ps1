@@ -119,6 +119,12 @@ $script:switchPyBtn = $null
 $script:logBox = $null
 $script:statusLabel = $null
 
+# 管理员检测：卸载/切换 JDK/Python 需要写注册表环境变量，必须管理员
+function Test-IsAdmin {
+    $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    return (New-Object System.Security.Principal.WindowsPrincipal($id)).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Start-Gui {
     # ===== 窗口 =====
     $form = New-Object System.Windows.Forms.Form
@@ -221,6 +227,10 @@ function Start-Gui {
     $script:uninstallBtn.Size = New-Object System.Drawing.Size(110, 32)
     $script:uninstallBtn.Location = New-Object System.Drawing.Point(250, 5)
     $script:uninstallBtn.Add_Click({
+        if (-not (Test-IsAdmin)) {
+            [System.Windows.Forms.MessageBox]::Show("卸载需要管理员权限。`n请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』。", "需要管理员权限") | Out-Null
+            return
+        }
         $selected = @($script:checkboxes | Where-Object { $_.Checked })
         if ($selected.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show("请先勾选要卸载的工具", "提示") | Out-Null
@@ -271,6 +281,10 @@ function Start-Gui {
     $script:switchJdkBtn.Location = New-Object System.Drawing.Point(0, 42)
     $script:switchJdkBtn.Add_Click({
         Invoke-GuiAction -Action {
+            if (-not (Test-IsAdmin)) {
+                Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
+                return
+            }
             # 扫描 Temurin (Eclipse Adoptium) + Oracle (C:\Program Files\Java) 两种安装路径
             $jdks = @()
             foreach ($base in @("C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*")) {
@@ -295,6 +309,10 @@ function Start-Gui {
     $script:switchPyBtn.Location = New-Object System.Drawing.Point(110, 42)
     $script:switchPyBtn.Add_Click({
         Invoke-GuiAction -Action {
+            if (-not (Test-IsAdmin)) {
+                Write-Host "[需要管理员] 请关闭本窗口，右键『启动图形界面.bat』→『以管理员身份运行』后重试"
+                return
+            }
             $pythons = @()
             foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), "C:\Program Files\Python3*")) {
                 $pythons += @(Get-ChildItem $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue)
