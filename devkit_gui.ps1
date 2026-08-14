@@ -271,8 +271,13 @@ function Start-Gui {
     $script:switchJdkBtn.Location = New-Object System.Drawing.Point(0, 42)
     $script:switchJdkBtn.Add_Click({
         Invoke-GuiAction -Action {
-            $jdks = @(Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
-            if ($jdks.Count -eq 0) { Write-Host "未检测到 Temurin JDK，请先安装"; return }
+            # 扫描 Temurin (Eclipse Adoptium) + Oracle (C:\Program Files\Java) 两种安装路径
+            $jdks = @()
+            foreach ($base in @("C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*")) {
+                $jdks += @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue)
+            }
+            $jdks = @($jdks | Sort-Object Name -Descending | Select-Object -Unique)
+            if ($jdks.Count -eq 0) { Write-Host "未检测到已安装 JDK，请先安装"; return }
             for ($i = 0; $i -lt $jdks.Count; $i++) { Write-Host "  [$($i + 1)]  $($jdks[$i].Name)" }
             $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 JDK 编号 [1-$($jdks.Count)]，回车默认 1", "切换 Java 版本", "1")
             $idx = 0
@@ -296,7 +301,12 @@ function Start-Gui {
             }
             $pythons = @($pythons | Sort-Object Name -Descending | Select-Object -Unique)
             if ($pythons.Count -eq 0) { Write-Host "未检测到已安装 Python，请先安装"; return }
-            for ($i = 0; $i -lt $pythons.Count; $i++) { Write-Host "  [$($i + 1)]  $($pythons[$i].Name)" }
+            for ($i = 0; $i -lt $pythons.Count; $i++) {
+                $ver = ""
+                try { $ver = (& (Join-Path $pythons[$i].FullName "python.exe") --version 2>&1) -replace '^Python\s*', '' } catch {}
+                $verPart = if ($ver) { " (Python $ver)" } else { "" }
+                Write-Host "  [$($i + 1)]  $($pythons[$i].Name)$verPart"
+            }
             $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 Python 编号 [1-$($pythons.Count)]，回车默认 1", "切换 Python 版本", "1")
             $idx = 0
             if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $pythons.Count) { $idx = [int]$sel - 1 }

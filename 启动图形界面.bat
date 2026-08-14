@@ -10,9 +10,16 @@ if not exist "%~dp0devkit_gui.ps1" (
     exit /b 1
 )
 
+rem Check admin: uninstall/install and env-var writes need elevation
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Requesting administrator privileges (UAC)...
+    powershell -NoProfile -Command "Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0devkit_gui.ps1' -Verb RunAs"
+    exit /b
+)
+
 echo.
-echo   Starting DevEnvKit GUI...
-echo   Run as Administrator if install needs elevated permission.
+echo   Starting DevEnvKit GUI (Administrator)...
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0devkit_gui.ps1"

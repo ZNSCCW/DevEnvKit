@@ -395,9 +395,9 @@ function Set-JavaEnv {
     if (-not $JdkPath -or -not (Test-Path (Join-Path $JdkPath "bin\java.exe"))) {
         Write-Warn "无效的 JDK 路径: $JdkPath"; return $false
     }
-    # 1. 清理 PATH 中旧 JDK 的绝对路径（Eclipse Adoptium\jdk-*\bin），保留 %JAVA_HOME%\bin 变量引用
+    # 1. 清理 PATH 中旧 JDK 的绝对路径（Eclipse Adoptium / Java\jdk-*\bin），保留 %JAVA_HOME%\bin 变量引用
     #    -AllScopes：同时清理 Machine + User（手动装的 JDK 可能在 User PATH）
-    $null = Remove-FromPath -Pattern 'Eclipse Adoptium\\jdk-[^;]*\\bin' -AllScopes
+    $null = Remove-FromPath -Pattern 'Eclipse Adoptium\\jdk-[^;]*\\bin|Java\\jdk-[^;]*\\bin' -AllScopes
     # 2. 写入 JAVA_HOME（无论之前是否设置都更新——版本切换核心）
     [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $JdkPath, "Machine")
     Write-OK "JAVA_HOME 已设置为: $JdkPath" -NoCount
@@ -411,9 +411,14 @@ function Set-JavaEnv {
 function Switch-JavaVersion {
     Write-Host "`n  ── 🔀 切换 Java 版本 (JAVA_HOME) ────────────────────────" -ForegroundColor $ColorMenu
     Write-AppendLog "`n  ── 切换 Java 版本 ──"
-    $jdks = @(Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    # 扫描 Temurin (Eclipse Adoptium) + Oracle (C:\Program Files\Java) 两种安装路径
+    $jdks = @()
+    foreach ($base in @("C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*")) {
+        $jdks += @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue)
+    }
+    $jdks = @($jdks | Sort-Object Name -Descending | Select-Object -Unique)
     if ($jdks.Count -eq 0) {
-        Write-Warn "未检测到已安装的 Temurin JDK，请先安装 (菜单 7)"
+        Write-Warn "未检测到已安装的 JDK，请先安装 (菜单 7)"
         return
     }
     $curHome = [System.Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
@@ -776,8 +781,8 @@ function Install-Java {
     $r = Invoke-WingetInstall -PackageId $choice.PackageId -DisplayName $choice.Label
     # 环境配置：统一走 Set-JavaEnv（JAVA_HOME 更新 + PATH 用 %JAVA_HOME%\bin 引用 + 清理旧 JDK 路径）
     try {
-        $latest = Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue |
-                  Sort-Object Name -Descending | Select-Object -First 1
+        $latest = @(Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*", "C:\Program Files\Java\jdk-*" -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object Name -Descending | Select-Object -First 1)
         if ($latest) {
             $null = Set-JavaEnv -JdkPath $latest.FullName
             # 干净安装：清理注册表旧 JavaSoft 残留（Eclipse 等 IDE 读注册表）
