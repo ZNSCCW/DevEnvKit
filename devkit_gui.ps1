@@ -153,7 +153,16 @@ function Start-Gui {
         }
     }
     $left.Controls.Add($checkPanel)
-    $form.Controls.Add($left)
+
+    # ===== 左右分割容器：SplitContainer（Panel1 固定勾选列表，Panel2 自动剩余，杜绝 Dock Fill 重叠） =====
+    $split = New-Object System.Windows.Forms.SplitContainer
+    $split.Dock = "Fill"
+    $split.Orientation = "Vertical"
+    $split.SplitterDistance = 360
+    $split.Panel1MinSize = 280
+    $split.Panel2MinSize = 320
+    $split.SplitterWidth = 6
+    $split.Panel1.Controls.Add($checkPanel)
 
     # ===== 右侧：日志 + 按钮（手动 Anchor 布局，规避 Dock Fill/Bottom 在 PowerShell 下的重叠坑） =====
     $right = New-Object System.Windows.Forms.Panel
@@ -221,7 +230,6 @@ function Start-Gui {
     $script:statusLabel.Location = New-Object System.Drawing.Point(0, 45)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
-    $form.Controls.Add($right)
     # Resize 联动：日志框高度 = 客户区 - 按钮面板高（避免重叠）
     $right.Add_Resize({
         $w = $right.ClientSize.Width - 20
@@ -230,6 +238,8 @@ function Start-Gui {
         $bottom.Location = New-Object System.Drawing.Point(10, [Math]::Max(110, $h - 100))
         $bottom.Size = New-Object System.Drawing.Size($w, 90)
     })
+    $split.Panel2.Controls.Add($right)
+    $form.Controls.Add($split)
 
     # ===== Timer：日志刷新 =====
     $timer = New-Object System.Windows.Forms.Timer
@@ -240,6 +250,7 @@ function Start-Gui {
     # ===== 启动时显示已装工具位置（只读预览） =====
     $form.Add_Shown({
         $form.Activate()
+        $split.SplitterDistance = 360   # 显示后设置分割位置更可靠
         Invoke-GuiAction -Action { Show-InstallLocations }
     })
 
