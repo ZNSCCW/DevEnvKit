@@ -1,6 +1,6 @@
 <#
 ============================================================================
-  🛠️  DevEnvKit 图形界面 (v1.8 GUI)
+  🛠️  DevEnvKit 图形界面 (v2.0 GUI)
   基于 WinForms，复用 setup_dev_env.ps1 全部函数
   用法: powershell -ExecutionPolicy Bypass -File devkit_gui.ps1
   打包: ps2exe -inputFile devkit_gui.ps1 -outputFile DevEnvKit.exe -noConsole
@@ -118,7 +118,7 @@ $script:statusLabel = $null
 function Start-Gui {
     # ===== 窗口 =====
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "DevEnvKit 环境管理器 v1.8"
+    $form.Text = "DevEnvKit 环境管理器 v2.0"
     $form.Size = New-Object System.Drawing.Size(860, 620)
     $form.StartPosition = "CenterScreen"
     $form.Font = New-Object System.Drawing.Font("Microsoft YaHei", 9)
