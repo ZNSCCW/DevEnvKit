@@ -215,6 +215,16 @@
 - 实测确认：完整下载 ✅、**断点续传**（4MB 半成品 → 续传后完整文件 9395475 字节分毫不差）✅、代理感知 ✅
 - **教训：bat 启动器默认 powershell.exe (PS 5.1)，与 pwsh 7 行为不同，跨版本 API 必须实测**
 
+### 📦 打包 exe 与防拦截（可选）
+- **打包**：`.\build.ps1`（需 ps2exe 模块；加 `-InstallPs2Exe` 自动安装）→ 生成 `DevEnvKit.exe`（含自签名签名 + SHA256 校验输出）
+- **为什么会被拦**：ps2exe 打包的 exe **无有效代码签名** + 新文件流行度低 → Defender SmartScreen / 360 等会提示
+- **处理方法**：
+  - Defender：点「更多信息」→「仍要运行」
+  - 误报申诉：微软 WDSI（https://www.microsoft.com/en-us/wdsi/filesubmission）、360 安全卫士误报申诉、火绒安全中心
+  - 攒信誉：发布到 GitHub Releases，下载量上升后 SmartScreen 自动放行
+  - **零拦截方案**：直接用 `devkit_gui.ps1`（源码运行，无需 exe）——简历项目本来就要展示源码
+- 注意：故意**不加壳 / 不加密**（ps2exe 的 `-encrypt`、UPX 等混淆反而**增加**启发式误报）
+
 ---
 
 ## 新增功能 (v1.5)
