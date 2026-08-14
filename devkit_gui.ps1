@@ -8,6 +8,7 @@
 #>
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName Microsoft.VisualBasic   # InputBox 支持（版本切换）
 
 # ===== 1. 加载 setup_dev_env.ps1 的全部函数（AST 提取，不执行主流程） =====
 $script:setupPath = Join-Path $PSScriptRoot "setup_dev_env.ps1"
@@ -41,29 +42,29 @@ $script:busy = $false
 # ===== 3. 工具清单（按开发方向分组，Label 与菜单一致） =====
 $script:toolGroups = @(
     @{ Group = "🧩 基础必备"; Tools = @(
-        @{ Name = "Git";             Func = "Install-Git" },
-        @{ Name = "7-Zip";           Func = "Install-7Zip" },
-        @{ Name = "Windows Terminal";Func = "Install-WinTerminal" },
-        @{ Name = "PowerToys";       Func = "Install-PowerToys" },
-        @{ Name = "VS Code";         Func = "Install-VSCode" })},
+        @{ Name = "Git";             Func = "Install-Git";             Id = "Git.Git" },
+        @{ Name = "7-Zip";           Func = "Install-7Zip";           Id = "7zip.7zip" },
+        @{ Name = "Windows Terminal";Func = "Install-WinTerminal";    Id = "Microsoft.WindowsTerminal" },
+        @{ Name = "PowerToys";       Func = "Install-PowerToys";      Id = "Microsoft.PowerToys" },
+        @{ Name = "VS Code";         Func = "Install-VSCode";         Id = "Microsoft.VisualStudioCode" })},
     @{ Group = "☕ Java 后端"; Tools = @(
-        @{ Name = "Java JDK";        Func = "Install-Java" },
-        @{ Name = "Maven";           Func = "Install-Maven" },
-        @{ Name = "MySQL";           Func = "Install-MySQL" },
-        @{ Name = "Redis";           Func = "Install-Redis" },
-        @{ Name = "DBeaver";         Func = "Install-DBeaver" })},
+        @{ Name = "Java JDK";        Func = "Install-Java";           Id = "EclipseAdoptium.Temurin.21.JDK" },
+        @{ Name = "Maven";           Func = "Install-Maven";          Id = "" },
+        @{ Name = "MySQL";           Func = "Install-MySQL";          Id = "Oracle.MySQL" },
+        @{ Name = "Redis";           Func = "Install-Redis";          Id = "Redis.Redis" },
+        @{ Name = "DBeaver";         Func = "Install-DBeaver";        Id = "DBeaver.DBeaver.Community" })},
     @{ Group = "🖥️ 前端 / Web"; Tools = @(
-        @{ Name = "Node.js";         Func = "Install-NodeJS" })},
+        @{ Name = "Node.js";         Func = "Install-NodeJS";         Id = "OpenJS.NodeJS.LTS" })},
     @{ Group = "🐍 Python"; Tools = @(
-        @{ Name = "Python";          Func = "Install-Python" },
-        @{ Name = "Miniconda";       Func = "Install-Miniconda" })},
+        @{ Name = "Python";          Func = "Install-Python";         Id = "Python.Python.3.12" },
+        @{ Name = "Miniconda";       Func = "Install-Miniconda";      Id = "Anaconda.Miniconda3" })},
     @{ Group = "⚙️ C/C++"; Tools = @(
-        @{ Name = "C/C++ (MinGW+CMake)"; Func = "Install-CPP" })},
+        @{ Name = "C/C++ (MinGW+CMake)"; Func = "Install-CPP";        Id = "MSYS2.MSYS2" })},
     @{ Group = "🤖 移动开发"; Tools = @(
-        @{ Name = "Android Studio + SDK"; Func = "Install-Android" })},
+        @{ Name = "Android Studio + SDK"; Func = "Install-Android";   Id = "Google.AndroidStudio" })},
     @{ Group = "🐳 容器 / 运维"; Tools = @(
-        @{ Name = "Docker";          Func = "Install-Docker" },
-        @{ Name = "kubectl";         Func = "Install-Kubectl" })}
+        @{ Name = "Docker";          Func = "Install-Docker";         Id = "Docker.DockerDesktop" },
+        @{ Name = "kubectl";         Func = "Install-Kubectl";        Id = "Kubernetes.kubectl" })}
 )
 $script:checkboxes = @()   # 全部 CheckBox 控件
 
@@ -112,6 +113,9 @@ function Invoke-GuiAction {
 $script:installBtn = $null
 $script:viewBtn = $null
 $script:uninstallBtn = $null
+$script:selectAllBtn = $null
+$script:switchJdkBtn = $null
+$script:switchPyBtn = $null
 $script:logBox = $null
 $script:statusLabel = $null
 
@@ -145,7 +149,7 @@ function Start-Gui {
         foreach ($t in $g.Tools) {
             $cb = New-Object System.Windows.Forms.CheckBox
             $cb.Text = $t.Name
-            $cb.Tag = $t.Func
+            $cb.Tag = $t          # Tag 存工具对象（含 Func/Id/Name）
             $cb.AutoSize = $true
             $cb.Padding = New-Object System.Windows.Forms.Padding(15, 2, 0, 2)
             $checkPanel.Controls.Add($cb)
@@ -194,11 +198,11 @@ function Start-Gui {
             [System.Windows.Forms.MessageBox]::Show("请先勾选要安装的工具", "提示") | Out-Null
             return
         }
-        $funcs = @($selected | ForEach-Object { $_.Tag })
+        $tools = @($selected | ForEach-Object { $_.Tag })
         Invoke-GuiAction -Action {
-            foreach ($fn in $funcs) {
-                Write-Host "===== 开始安装: $fn ====="
-                try { & (Get-Item "function:$fn") } catch { Write-Host "安装失败: $_" }
+            foreach ($t in $tools) {
+                Write-Host "===== 开始安装: $($t.Name) ====="
+                try { & (Get-Item "function:$($t.Func)") } catch { Write-Host "安装失败: $_" }
             }
             Write-Host "===== 全部完成 ====="
         }
@@ -213,21 +217,100 @@ function Start-Gui {
     $bottom.Controls.Add($script:viewBtn)
 
     $script:uninstallBtn = New-Object System.Windows.Forms.Button
-    $script:uninstallBtn.Text = "🗑️ 卸载 (待选)"
+    $script:uninstallBtn.Text = "🗑️ 卸载所选"
     $script:uninstallBtn.Size = New-Object System.Drawing.Size(110, 32)
     $script:uninstallBtn.Location = New-Object System.Drawing.Point(250, 5)
     $script:uninstallBtn.Add_Click({
-        # 简单版：勾选的要卸载（复用 Uninstall-Tool，但需 PackageId 映射——这里直接提示控制台版使用）
-        [System.Windows.Forms.MessageBox]::Show(
-            "卸载请在勾选列表选择后使用: 当前 GUI 版卸载走控制台菜单 [28]，或手动 winget uninstall",
-            "卸载说明") | Out-Null
+        $selected = @($script:checkboxes | Where-Object { $_.Checked })
+        if ($selected.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("请先勾选要卸载的工具", "提示") | Out-Null
+            return
+        }
+        $tools = @($selected | ForEach-Object { $_.Tag })
+        $names = ($tools | ForEach-Object { $_.Name }) -join ', '
+        $r = [System.Windows.Forms.MessageBox]::Show("确认卸载: $names ?", "卸载确认",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        Invoke-GuiAction -Action {
+            foreach ($t in $tools) {
+                Write-Host "===== 卸载: $($t.Name) ====="
+                try {
+                    if ($t.Id) {
+                        winget uninstall --id $t.Id --silent --accept-source-agreements 2>&1 | ForEach-Object { Write-Host "  $_" }
+                        Write-Host "  卸载指令已执行 (退出码 $LASTEXITCODE)"
+                    } else {
+                        # Maven 特例（无 winget 包）：提示手动清理
+                        Write-Host "  Maven 无 winget 包——请手动删除目录并清理 MAVEN_HOME"
+                        [System.Environment]::SetEnvironmentVariable("MAVEN_HOME", $null, "Machine")
+                        $null = Remove-FromPath -Pattern 'maven' -AllScopes
+                        Write-Host "  MAVEN_HOME 已清除"
+                    }
+                } catch { Write-Host "卸载失败: $_" }
+            }
+            Write-Host "===== 卸载流程完成 ====="
+        }
     })
     $bottom.Controls.Add($script:uninstallBtn)
+
+    # 全选/全不选
+    $script:selectAllBtn = New-Object System.Windows.Forms.Button
+    $script:selectAllBtn.Text = "☑️ 全选"
+    $script:selectAllBtn.Size = New-Object System.Drawing.Size(80, 32)
+    $script:selectAllBtn.Location = New-Object System.Drawing.Point(370, 5)
+    $script:selectAllBtn.Add_Click({
+        $allChecked = @($script:checkboxes | Where-Object { -not $_.Checked }).Count -eq 0
+        foreach ($cb in $script:checkboxes) { $cb.Checked = -not $allChecked }
+        $script:selectAllBtn.Text = $(if ($allChecked) { "☑️ 全选" } else { "⬜ 全不选" })
+    })
+    $bottom.Controls.Add($script:selectAllBtn)
+
+    # 切换 JDK 版本（InputBox 选编号，复用 Set-JavaEnv）
+    $script:switchJdkBtn = New-Object System.Windows.Forms.Button
+    $script:switchJdkBtn.Text = "🔀 切换 JDK"
+    $script:switchJdkBtn.Size = New-Object System.Drawing.Size(100, 30)
+    $script:switchJdkBtn.Location = New-Object System.Drawing.Point(0, 42)
+    $script:switchJdkBtn.Add_Click({
+        Invoke-GuiAction -Action {
+            $jdks = @(Get-ChildItem "C:\Program Files\Eclipse Adoptium\jdk-*" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+            if ($jdks.Count -eq 0) { Write-Host "未检测到 Temurin JDK，请先安装"; return }
+            for ($i = 0; $i -lt $jdks.Count; $i++) { Write-Host "  [$($i + 1)]  $($jdks[$i].Name)" }
+            $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 JDK 编号 [1-$($jdks.Count)]，回车默认 1", "切换 Java 版本", "1")
+            $idx = 0
+            if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $jdks.Count) { $idx = [int]$sel - 1 }
+            $null = Set-JavaEnv -JdkPath $jdks[$idx].FullName
+            Write-Host "已切换 JDK → $($jdks[$idx].Name)（新终端生效，java -version 验证）"
+        }
+    })
+    $bottom.Controls.Add($script:switchJdkBtn)
+
+    # 切换 Python 版本（InputBox 选编号，复用 Remove-FromPath/Add-ToPath）
+    $script:switchPyBtn = New-Object System.Windows.Forms.Button
+    $script:switchPyBtn.Text = "🔀 切换 Python"
+    $script:switchPyBtn.Size = New-Object System.Drawing.Size(110, 30)
+    $script:switchPyBtn.Location = New-Object System.Drawing.Point(110, 42)
+    $script:switchPyBtn.Add_Click({
+        Invoke-GuiAction -Action {
+            $pythons = @()
+            foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), "C:\Program Files\Python3*")) {
+                $pythons += @(Get-ChildItem $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue)
+            }
+            $pythons = @($pythons | Sort-Object Name -Descending | Select-Object -Unique)
+            if ($pythons.Count -eq 0) { Write-Host "未检测到已安装 Python，请先安装"; return }
+            for ($i = 0; $i -lt $pythons.Count; $i++) { Write-Host "  [$($i + 1)]  $($pythons[$i].Name)" }
+            $sel = [Microsoft.VisualBasic.Interaction]::InputBox("输入 Python 编号 [1-$($pythons.Count)]，回车默认 1", "切换 Python 版本", "1")
+            $idx = 0
+            if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $pythons.Count) { $idx = [int]$sel - 1 }
+            $null = Remove-FromPath -Pattern 'Python3\d+' -AllScopes
+            $null = Add-ToPath -Entry $pythons[$idx].FullName -AllScopes
+            Write-Host "已切换 Python → $($pythons[$idx].Name)（新终端生效，python --version 验证）"
+        }
+    })
+    $bottom.Controls.Add($script:switchPyBtn)
 
     $script:statusLabel = New-Object System.Windows.Forms.Label
     $script:statusLabel.Text = "状态: 就绪"
     $script:statusLabel.AutoSize = $true
-    $script:statusLabel.Location = New-Object System.Drawing.Point(0, 45)
+    $script:statusLabel.Location = New-Object System.Drawing.Point(240, 47)
     $bottom.Controls.Add($script:statusLabel)
     $right.Controls.Add($bottom)
     # Resize 联动：日志框高度 = 客户区 - 按钮面板高（避免重叠）
