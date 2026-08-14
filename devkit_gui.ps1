@@ -38,7 +38,7 @@ function Write-AppendLog { param([string]$Message) }
 
 # GUI 版本选择对话框：主线程弹 ComboBox 让用户选安装版本（供安装按钮收集版本映射）
 function Show-VersionDialog {
-    param([string]$ToolName, [array]$Versions)
+    param([string]$ToolName, [array]$Versions, [string]$SearchPrefix = "", [string]$Exclude = "", [switch]$NoDynamic)
     if (-not $Versions -or $Versions.Count -le 1) { return $Versions[0] }
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "选择 $ToolName 版本"
@@ -56,6 +56,11 @@ function Show-VersionDialog {
     $combo.Size = New-Object System.Drawing.Size(345, 25)
     $combo.DropDownStyle = "DropDownList"
     foreach ($v in $Versions) { [void]$combo.Items.Add($v.Label) }
+    $dynamicIdx = -1
+    if (-not $NoDynamic -and $SearchPrefix) {
+        $dynamicIdx = $Versions.Count
+        [void]$combo.Items.Add("其他版本（winget 实时探测）")
+    }
     $combo.SelectedIndex = 0
     $ok = New-Object System.Windows.Forms.Button
     $ok.Text = "确定"
@@ -68,7 +73,24 @@ function Show-VersionDialog {
     $form.Controls.AddRange(@($label, $combo, $ok, $cancel))
     $form.AcceptButton = $ok
     $form.CancelButton = $cancel
-    if ($form.ShowDialog() -eq "OK") { return $Versions[$combo.SelectedIndex] }
+    if ($form.ShowDialog() -eq "OK") {
+        $sel = $combo.SelectedIndex
+        if ($sel -eq $dynamicIdx) {
+            # 动态探测分支：winget 实时列出全部可用版本（未来新版本零改动支持）
+            try {
+                $found = Search-WingetVersions -Prefix $SearchPrefix -Exclude $Exclude
+                if (-not $found -or $found.Count -eq 0) {
+                    [System.Windows.Forms.MessageBox]::Show("winget 探测无结果（可能源不可达），改用推荐版本", "$ToolName 版本") | Out-Null
+                    return $Versions[0]
+                }
+                return Show-VersionDialog -ToolName $ToolName -Versions @($found) -NoDynamic
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show("探测失败: $_`n改用推荐版本", "$ToolName 版本") | Out-Null
+                return $Versions[0]
+            }
+        }
+        return $Versions[$sel]
+    }
     return $null   # 跳过 → 不安装此工具
 }
 # setup 函数用到的颜色变量（GUI 无控制台，仍需定义避免 ForegroundColor 绑定失败）
@@ -106,7 +128,7 @@ $script:toolGroups = @(
         @{ Name = "PowerToys";       Func = "Install-PowerToys";      Id = "Microsoft.PowerToys" },
         @{ Name = "VS Code";         Func = "Install-VSCode";         Id = "Microsoft.VisualStudioCode" })},
     @{ Group = "☕ Java 后端"; Tools = @(
-        @{ Name = "Java JDK";        Func = "Install-Java";           Id = "EclipseAdoptium.Temurin.21.JDK"; Versions = @(
+        @{ Name = "Java JDK";        Func = "Install-Java";           Id = "EclipseAdoptium.Temurin.21.JDK"; SearchPrefix = "EclipseAdoptium.Temurin"; Exclude = "\.JRE"; Versions = @(
             @{Label="JDK 21 (LTS, 推荐)"; PackageId="EclipseAdoptium.Temurin.21.JDK"},
             @{Label="JDK 17 (LTS)";       PackageId="EclipseAdoptium.Temurin.17.JDK"},
             @{Label="JDK 11 (LTS)";       PackageId="EclipseAdoptium.Temurin.11.JDK"},
@@ -116,11 +138,11 @@ $script:toolGroups = @(
         @{ Name = "Redis";           Func = "Install-Redis";          Id = "Redis.Redis" },
         @{ Name = "DBeaver";         Func = "Install-DBeaver";        Id = "DBeaver.DBeaver.Community" })},
     @{ Group = "🖥️ 前端 / Web"; Tools = @(
-        @{ Name = "Node.js";         Func = "Install-NodeJS";         Id = "OpenJS.NodeJS.LTS"; Versions = @(
+        @{ Name = "Node.js";         Func = "Install-NodeJS";         Id = "OpenJS.NodeJS.LTS"; SearchPrefix = "OpenJS.NodeJS"; Exclude = ""; Versions = @(
             @{Label="Node.js 22 (LTS, 推荐)"; PackageId="OpenJS.NodeJS.LTS"},
             @{Label="Node.js 20 (LTS)";       PackageId="OpenJS.NodeJS.20"}) })},
     @{ Group = "🐍 Python"; Tools = @(
-        @{ Name = "Python";          Func = "Install-Python";         Id = "Python.Python.3.12"; Versions = @(
+        @{ Name = "Python";          Func = "Install-Python";         Id = "Python.Python.3.12"; SearchPrefix = "Python.Python.3"; Exclude = ""; Versions = @(
             @{Label="Python 3.12 (推荐)"; PackageId="Python.Python.3.12"},
             @{Label="Python 3.13";        PackageId="Python.Python.3.13"},
             @{Label="Python 3.11";        PackageId="Python.Python.3.11"}) },
@@ -324,7 +346,7 @@ function Start-Gui {
         $skipped = @()
         foreach ($t in $tools) {
             if ($t.Versions) {
-                $chosen = Show-VersionDialog -ToolName $t.Name -Versions @($t.Versions)
+                $chosen = Show-VersionDialog -ToolName $t.Name -Versions @($t.Versions) -SearchPrefix $t.SearchPrefix -Exclude $t.Exclude
                 if ($null -eq $chosen) { $skipped += $t.Name; continue }
                 $versionMap[$t.Name] = $chosen.PackageId
             }

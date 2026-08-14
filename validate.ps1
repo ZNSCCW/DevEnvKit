@@ -216,7 +216,7 @@ if (-not (Test-Path $guiPath)) {
     }
 
     # 6.3 GUI 直接调用的 setup 函数
-    $guiDirectCalls = @('Show-InstallLocations', 'Set-JavaEnv', 'Remove-FromPath', 'Add-ToPath', 'Load-Config', 'Save-Config', 'Write-Info', 'Write-OK', 'Write-Warn', 'Write-AppendLog')
+    $guiDirectCalls = @('Show-InstallLocations', 'Set-JavaEnv', 'Remove-FromPath', 'Add-ToPath', 'Load-Config', 'Save-Config', 'Write-Info', 'Write-OK', 'Write-Warn', 'Write-AppendLog', 'Search-WingetVersions')
     $missingCalls = @($guiDirectCalls | Where-Object { $_ -notin $setupFuncs })
     if ($missingCalls.Count -eq 0) {
         Write-Host "  ✅ GUI 直接调用函数: $($guiDirectCalls.Count) 个全部存在" -ForegroundColor Green
