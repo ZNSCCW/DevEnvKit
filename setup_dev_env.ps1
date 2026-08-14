@@ -357,31 +357,35 @@ function Get-OSArch {
 }
 
 # 统一 PATH 追加：去重（幂等）+ 2047 长度保护（Windows 环境变量上限，超限截断会导致系统命令失灵）
+# -AllScopes：同时处理 Machine + User（winget 用户级工具如 Python 装在 User PATH）
 function Add-ToPath {
-    param([string]$Entry, [string]$Scope = "Machine")
-    $cur = [System.Environment]::GetEnvironmentVariable("Path", $Scope)
-    if ($cur -match [regex]::Escape($Entry)) { return $true }  # 已存在则跳过（幂等）
-    $new = "$cur;$Entry"
-    if ($new.Length -gt 2047) {
-        Write-Warn "PATH 超长 ($($new.Length)/2047)，未追加 '$Entry'——请手动清理 PATH 或改用变量引用 (如 %JAVA_HOME%\bin)"
-        return $false
+    param([string]$Entry, [string]$Scope = "Machine", [switch]$AllScopes)
+    $scopes = if ($AllScopes) { @('Machine', 'User') } else { @($Scope) }
+    foreach ($s in $scopes) {
+        $cur = [System.Environment]::GetEnvironmentVariable("Path", $s)
+        if ($cur -match [regex]::Escape($Entry)) { continue }  # 已存在则跳过（幂等）
+        $new = "$cur;$Entry"
+        if ($new.Length -gt 2047) {
+            Write-Warn "PATH($s) 超长 ($($new.Length)/2047)，未追加 '$Entry'——请手动清理 PATH 或改用变量引用 (如 %JAVA_HOME%\bin)"
+            continue
+        }
+        [System.Environment]::SetEnvironmentVariable("Path", $new, $s)
+        Write-OK "已将 $Entry 追加到 $s PATH" -NoCount
     }
-    [System.Environment]::SetEnvironmentVariable("Path", $new, $Scope)
-    Write-OK "已将 $Entry 追加到系统 PATH" -NoCount
-    return $true
 }
 
-# 从 PATH 移除匹配正则的条目（用于清理旧 JDK 绝对路径）
+# 从 PATH 移除匹配正则的条目（用于清理旧 JDK/Python 路径；-AllScopes 同时清理 Machine + User）
 function Remove-FromPath {
-    param([string]$Pattern, [string]$Scope = "Machine")
-    $cur = [System.Environment]::GetEnvironmentVariable("Path", $Scope)
-    $parts = $cur -split ';' | Where-Object { $_ -and ($_ -notmatch $Pattern) }
-    $new = $parts -join ';'
-    if ($new -ne $cur) {
-        [System.Environment]::SetEnvironmentVariable("Path", $new, $Scope)
-        return $true
+    param([string]$Pattern, [string]$Scope = "Machine", [switch]$AllScopes)
+    $scopes = if ($AllScopes) { @('Machine', 'User') } else { @($Scope) }
+    foreach ($s in $scopes) {
+        $cur = [System.Environment]::GetEnvironmentVariable("Path", $s)
+        $parts = $cur -split ';' | Where-Object { $_ -and ($_ -notmatch $Pattern) }
+        $new = $parts -join ';'
+        if ($new -ne $cur) {
+            [System.Environment]::SetEnvironmentVariable("Path", $new, $s)
+        }
     }
-    return $false
 }
 
 # 设置 JAVA_HOME + PATH 用 %JAVA_HOME%\bin 变量引用（以后切换版本只改 JAVA_HOME 一处）
@@ -392,14 +396,13 @@ function Set-JavaEnv {
         Write-Warn "无效的 JDK 路径: $JdkPath"; return $false
     }
     # 1. 清理 PATH 中旧 JDK 的绝对路径（Eclipse Adoptium\jdk-*\bin），保留 %JAVA_HOME%\bin 变量引用
-    if (Remove-FromPath -Pattern 'Eclipse Adoptium\\jdk-[^;]*\\bin') {
-        Write-Info "已清理 PATH 中的旧 JDK 绝对路径"
-    }
+    #    -AllScopes：同时清理 Machine + User（手动装的 JDK 可能在 User PATH）
+    $null = Remove-FromPath -Pattern 'Eclipse Adoptium\\jdk-[^;]*\\bin' -AllScopes
     # 2. 写入 JAVA_HOME（无论之前是否设置都更新——版本切换核心）
     [System.Environment]::SetEnvironmentVariable("JAVA_HOME", $JdkPath, "Machine")
     Write-OK "JAVA_HOME 已设置为: $JdkPath" -NoCount
     # 3. 确保 PATH 含 %JAVA_HOME%\bin（变量引用，切换只改 JAVA_HOME）
-    $null = Add-ToPath -Entry "%JAVA_HOME%\bin"
+    $null = Add-ToPath -Entry "%JAVA_HOME%\bin" -AllScopes
     Update-Path
     return $true
 }
@@ -466,10 +469,9 @@ function Switch-PythonVersion {
     else { Write-Warn "输入无效，默认选择第 1 项" }
     $target = $pythons[$idx].FullName
     # 清理 PATH 中的旧 Python 路径（Python3x 目录段），再加新路径（幂等+长度保护）
-    if (Remove-FromPath -Pattern 'Python3\d+') {
-        Write-Info "已清理 PATH 中的旧 Python 路径"
-    }
-    $null = Add-ToPath -Entry $target
+    # -AllScopes：winget 用户级 Python 装在 User PATH，必须同时清理 Machine + User
+    $null = Remove-FromPath -Pattern 'Python3\d+' -AllScopes
+    $null = Add-ToPath -Entry $target -AllScopes
     Update-Path
     Write-OK "已切换 Python 到 $($pythons[$idx].Name)，新终端生效 (python --version 验证)" -NoCount
 }

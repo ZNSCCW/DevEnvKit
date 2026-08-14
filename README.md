@@ -135,6 +135,7 @@
 - `Add-ToPath` 统一 PATH 追加：**去重（幂等）+ 2047 字符长度保护**（超限不追加并提示，避免截断导致系统命令失灵）
 - `Remove-FromPath` 按正则清理旧条目（旧 JDK 路径）
 - 全部 PATH 写入收敛到统一入口（MinGW / Maven / Android platform-tools）
+- **双作用域处理**：`-AllScopes` 同时清理 Machine + User PATH——实测发现 winget 用户级工具（如 Python 装到 `AppData\Local\Programs\Python`）在 **User PATH**，单清 Machine 会切换失败，Java/Python 切换均已双 scope
 
 ### 🔒 下载完整性 + 兼容
 - `Download-WithProgress` 支持 **SHA256/SHA512 Checksum 校验**（传 `-ExpectedHash` 即校验，不匹配自动重试）
