@@ -326,27 +326,37 @@ function Get-WingetExitHint {
 function Invoke-WingetInstall {
     param([string]$PackageId, [string]$DisplayName)
     Write-Step "正在安装 $DisplayName ..."
-    $r = winget install --id $PackageId --disable-interactivity --accept-source-agreements --accept-package-agreements 2>&1
-    $code = $LASTEXITCODE
-    if ($code -eq 0 -or $r -match "已安装|已找到已安装|No applicable update|already installed|Successfully installed") {
-        Write-OK "$DisplayName 安装成功 (或已安装)"; return $true
+    # 网络错误自动重试（github.com 等下载源国内间歇性不可达，重试 2 次大概率恢复）
+    $retries = 2
+    for ($attempt = 0; $attempt -le $retries; $attempt++) {
+        $r = winget install --id $PackageId --disable-interactivity --accept-source-agreements --accept-package-agreements 2>&1
+        $code = $LASTEXITCODE
+        $isNetworkErr = $r -match "InternetOpenUrl|0x80072efd|0x80072ee7|0x80072f8f|0x80072ef3"
+        if ($code -eq 0 -or $r -match "已安装|已找到已安装|No applicable update|already installed|Successfully installed") {
+            Write-OK "$DisplayName 安装成功 (或已安装)"; return $true
+        }
+        if ($isNetworkErr -and $attempt -lt $retries) {
+            Write-Warn "网络错误 (第 $($attempt + 1) 次): $($r | Select-Object -Last 1) — 3 秒后自动重试..."
+            Start-Sleep -Seconds 3
+            continue
+        }
+        if ($isNetworkErr) {
+            Write-Fail "$DisplayName 安装失败: 下载源连接失败 (github.com 等源国内直连间歇性不可达)"
+            Write-Info "建议：①自动重试后仍失败，可稍后重试本项 ②使用加速器/代理（如 Steam++ 加速 github.com）可显著改善 ③或到官网手动下载安装"
+            return $false
+        }
+        if ($r -match "No package found|找不到与输入条件匹配") {
+            Write-Fail "$DisplayName 安装失败: winget 中找不到该包 (PackageId=$PackageId)"
+            Write-Info "可用 'winget search $DisplayName' 查找正确包名，或到官网手动下载"; return $false
+        }
+        # 通用失败：解释退出码 + 给可执行建议（保证"不会装不了"的可排查性）
+        Write-Fail "$DisplayName 安装失败 (退出码 0x$($code.ToString('X8')))"
+        $hint = Get-WingetExitHint -Code $code
+        if ($hint) { Write-Info $hint }
+        Write-Info "可重试本项，或手动执行: winget install --id $PackageId"
+        Write-Info "详情: $($r | Select-Object -Last 2)"
+        return $false
     }
-    elseif ($r -match "InternetOpenUrl|0x80072efd|0x80072ee7|0x80072f8f") {
-        Write-Fail "$DisplayName 安装失败: 无法连接下载服务器"
-        Write-Info "可能原因：①网络未连接 ②GitHub 下载被拦截（如 Steam++ 加速器的 hosts 屏蔽，退出加速器后重试）③代理配置异常"
-        Write-Info "请退出加速器/检查网络后重试，或到官网手动下载安装"; return $false
-    }
-    elseif ($r -match "No package found|找不到与输入条件匹配") {
-        Write-Fail "$DisplayName 安装失败: winget 中找不到该包 (PackageId=$PackageId)"
-        Write-Info "可用 'winget search $DisplayName' 查找正确包名，或到官网手动下载"; return $false
-    }
-    # 通用失败：解释退出码 + 给可执行建议（保证"不会装不了"的可排查性）
-    Write-Fail "$DisplayName 安装失败 (退出码 0x$($code.ToString('X8')))"
-    $hint = Get-WingetExitHint -Code $code
-    if ($hint) { Write-Info $hint }
-    Write-Info "可重试本项，或手动执行: winget install --id $PackageId"
-    Write-Info "详情: $($r | Select-Object -Last 2)"
-    return $false
 }
 
 # 检测 MySQL（即使不在 PATH 中也能探测）
