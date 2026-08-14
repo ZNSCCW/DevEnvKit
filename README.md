@@ -124,6 +124,13 @@
 
 ## 新增功能 (v1.8)
 
+### 🖥️ 图形界面（WinForms，v1.8 新增）
+- **`启动图形界面.bat`** 双击即开 GUI（或 `powershell -File devkit_gui.ps1`）
+- 左侧：**18 个工具按开发方向分组勾选**；右侧：**实时日志框**（Start-Transcript 捕获）
+- 按钮：**⬇ 安装所选**（勾选后批量安装）、**📍 查看安装位置**（复用 `Show-InstallLocations`）、🗑️ 卸载说明
+- GUI 自动模式：已装工具不重复安装、版本选推荐项（无 Read-Host 阻塞）
+- **可打包成单文件 exe**：`ps2exe -inputFile devkit_gui.ps1 -outputFile DevEnvKit.exe -noConsole`（用户只下载 exe 双击即用；脚本转 exe 可能被杀软误报，需白名单/签名）
+
 ### 📍 安装位置查看与配置
 - 菜单 **[26] 查看已装工具安装位置**：探测并列出全部工具的安装路径（`Get-Command` 来源 + 已知路径回退 + 环境变量），纯只读
 - 菜单 **[27] 安装目录设置**：可自定义 **Maven** 安装目录（存 `devkit.conf` 配置文件）；**winget 安装的工具（JDK/Python/Node 等）位置由安装器决定，不可自定义**——如实说明
