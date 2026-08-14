@@ -225,6 +225,7 @@
   - **零拦截方案**：直接用 `devkit_gui.ps1`（源码运行，无需 exe）——简历项目本来就要展示源码
 - 注意：故意**不加壳 / 不加密**（ps2exe 的 `-encrypt`、UPX 等混淆反而**增加**启发式误报）
 - **已知坑（已修复）**：ps2exe 打包后 `$PSScriptRoot` 为空字符串，会报 `Path 参数为空`——`devkit_gui.ps1` 已用 `Get-ScriptDir`（ps1 用 `$PSScriptRoot`，exe 用 `GetCommandLineArgs()[0]`）兼容两种运行方式
+- **已知坑（已修复）**：ps2exe `-noConsole` 下 `Write-Host` 没有控制台可写，会**逐条弹 MessageBox**——已覆盖 `Write-Host` 为"写入日志文件"版本（日志框由 Timer 读取刷新），不再用 Start-Transcript
 
 ---
 

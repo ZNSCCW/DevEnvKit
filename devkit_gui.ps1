@@ -39,6 +39,22 @@ function Write-AppendLog { param([string]$Message) }
 $ColorTitle = "Cyan"; $ColorSuccess = "Green"; $ColorError = "Red"; $ColorWarning = "Yellow"
 $ColorInfo = "White"; $ColorMenu = "Magenta"; $ColorPrompt = "Cyan"; $ColorStep = "Cyan"
 
+# ===== 1.5 覆盖 Write-Host：ps2exe -noConsole 下 Write-Host 没有控制台可写，会**逐条弹 MessageBox**！
+#      改为写入日志文件（日志框由 Timer 读取刷新）。setup 提取的函数与 GUI 自身都走这里。
+function Write-Host {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)] [object]$Object,
+        [object]$ForegroundColor,
+        [object]$BackgroundColor,
+        [switch]$NoNewline,
+        [object]$Separator = ' '
+    )
+    $text = ($Object | ForEach-Object { if ($null -eq $_) { '' } else { [string]$_ } }) -join "$Separator"
+    if (-not $NoNewline) { $text += "`r`n" }
+    Add-Content -Path $script:logPath -Value $text -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+
 # ===== 2. 全局状态 =====
 $script:logPath = Join-Path $env:TEMP "devkit_gui_log.txt"
 $script:lastLogLength = 0
@@ -76,7 +92,7 @@ $script:checkboxes = @()   # 全部 CheckBox 控件
 # ===== 4. 日志刷新（Timer 读 transcript 文件追加到文本框） =====
 function Update-LogBox {
     if (-not (Test-Path $script:logPath)) { return }
-    $content = Get-Content $script:logPath -Raw -ErrorAction SilentlyContinue
+    $content = Get-Content $script:logPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($content) {
         $newText = $content.Substring([Math]::Min($script:lastLogLength, $content.Length))
         if ($newText) {
@@ -93,7 +109,7 @@ function Update-LogBox {
 }
 
 # ===== 5. 动作 =====
-# 运行一组函数，输出经 Start-Transcript 捕获到日志文件
+# 运行一组函数，输出经覆盖版 Write-Host 写入日志文件（ps2exe noConsole 下不能用 Start-Transcript，会逐条弹框）
 function Invoke-GuiAction {
     param([scriptblock]$Action)
     if ($script:busy) { return }
@@ -102,12 +118,7 @@ function Invoke-GuiAction {
         Remove-Item $script:logPath -Force -ErrorAction SilentlyContinue
         $script:lastLogLength = 0
         $script:logBox.Clear()
-        Start-Transcript -Path $script:logPath -Force -ErrorAction SilentlyContinue | Out-Null
-        try {
-            & $Action
-        } finally {
-            Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
-        }
+        & $Action
         Update-LogBox
     } finally {
         $script:busy = $false
